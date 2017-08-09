@@ -51,7 +51,7 @@
 	getRoot
 	getScissorCoordsConverter, setScissorCoordsConverter
 	getSpriteLoader, setSpriteLoader
-	getTargetCallback, setTargetCallback
+	getTarget, getTargetCallback, setTargetCallback
 	isBusy, isMouseBusy
 	isIgnoringKeyboardInput
 	isMouseGrabbed, setMouseIsGrabbed
@@ -69,6 +69,7 @@
 	- getAnchor, setAnchor, getAnchorX, setAnchorX, getAnchorY, setAnchorY
 	- getCallback, setCallback, trigger, triggerBubbling
 	- getClosest
+	- getData, setData, swapData
 	- getDimensions, setDimensions, getWidth, setWidth, getHeight, setHeight
 	- getGui
 	- getId
@@ -202,7 +203,7 @@ local Cs = {}
 local applyStyle
 local coroutineIterator, newIteratorCoroutine
 local drawBackground
-local errorf
+local errorf, assertArgType
 local F
 local getTextHeight
 local lerp
@@ -293,6 +294,14 @@ function errorf(i, s, ...)
 		error(s:format(...), i+1)
 	else
 		error(i:format(s, ...), 2)
+	end
+end
+
+-- assertArgType( functionName, argumentNumber, value, expectedValueType )
+function assertArgType(name, n, v, expectedType)
+	local vType = type(v)
+	if (vType ~= expectedType) then
+		errorf(3, "bad argument #%d to '%s' (%s expected, got %s)", n, name, expectedType, vType)
 	end
 end
 
@@ -890,46 +899,52 @@ Gui:define('_spriteLoader')
 
 
 
--- callback, errorMessage = getTargetCallback( target )
--- target: "ID.subID.anotherSubID.event"
-function Gui:getTargetCallback(target)
+-- callback, errorMessage = getTarget( target )
+-- target: "ID.subID.anotherSubID"
+function Gui:getTarget(target)
 	local el = self._root
 	if (not el) then
-		return nil
+		return nil, 'there is no root element'
 	end
-	target = matchAll(target, '[^.]+')
-	local len = #target
-	for i = 1, len-1 do
+	local ids = matchAll(target, '[^.]+')
+	for i = 1, #ids do
 		if (not el:is(Cs.container)) then
 			return false, F'%q is not a container'(el._id)
 		end
-		el = el:find(target[i])
+		el = el:find(ids[i])
 		if (not el) then
-			return nil, F'%q does not exist'(target[i])..' in '..(i == 1 and 'root' or '"'..target[i-1]..'"')
+			return nil, F'%q does not exist in %q'(ids[i], (ids[i-1] or 'root'))
 		end
 	end
-	return el:getCallback(target[len])
+	return el
 end
 
--- success, errorMessage = setTargetCallback( target, callback )
--- target: "ID.subID.anotherSubID.event"
-function Gui:setTargetCallback(target, cb)
-	local el = self._root
+-- callback, errorMessage = getTargetCallback( targetAndEvent )
+-- targetAndEvent: "ID.subID.anotherSubID.event"
+function Gui:getTargetCallback(targetAndEvent)
+	local target, event = targetAndEvent:match('^(.-)%.?([^.]+)$')
+	if (not target) then
+		return nil, F'bad targetAndEvent value %q'(targetAndEvent)
+	end
+	local el, err = self:getTarget(target)
 	if (not el) then
-		return false, 'there is no root element'
+		return nil, err
 	end
-	target = matchAll(target, '[^.]+')
-	local len = #target
-	for i = 1, len-1 do
-		if (not el:is(Cs.container)) then
-			return false, F'%q is not a container'(el._id)
-		end
-		el = el:find(target[i])
-		if (not el) then
-			return false, F'%q does not exist'(target[i])..' in '..(i == 1 and 'root' or '"'..target[i-1]..'"')
-		end
+	return el:getCallback(event)
+end
+
+-- success, errorMessage = setTargetCallback( targetAndEvent, callback )
+-- targetAndEvent: "ID.subID.anotherSubID.event"
+function Gui:setTargetCallback(targetAndEvent, cb)
+	local target, event = targetAndEvent:match('^(.-)%.?([^.]+)$')
+	if (not target) then
+		return nil, F'bad targetAndEvent value %q'(targetAndEvent)
 	end
-	el:setCallback(target[len], cb)
+	local el, err = self:getTarget(target)
+	if (not el) then
+		return false, err
+	end
+	el:setCallback(event, cb)
 	return true
 end
 
@@ -1213,6 +1228,7 @@ Cs.element = newClass('GuiElement', {
 	_background = nil,
 	_captureInput = false, -- (all input)
 	_closable = false,
+	_data = nil,
 	_floating = false, -- disables natural positioning in certain parents (e.g. bars)
 	_hidden = false,
 	_id = '',
@@ -1243,6 +1259,7 @@ function Cs.element:init(gui, data, parent)
 	retrieve(self, data, '_background')
 	retrieve(self, data, '_captureInput')
 	retrieve(self, data, '_closable')
+	-- retrieve(self, data, '_data')
 	retrieve(self, data, '_floating')
 	retrieve(self, data, '_hidden')
 	retrieve(self, data, '_id')
@@ -1253,7 +1270,8 @@ function Cs.element:init(gui, data, parent)
 	retrieve(self, data, '_width', '_height')
 	retrieve(self, data, '_x', '_y')
 
-	self.data = (data.data or {})
+	self._data = (data.data or {})
+	self.data = self._data
 
 	-- Make sure the element has an ID
 	if (self._id == '') then
@@ -1465,6 +1483,28 @@ function Cs.element.getClosest(el, elType)
 		el = el._parent
 	until (not el)
 	return nil
+end
+
+
+
+-- value = getData( key )
+-- NOTE: element:getData(k) is the same as element.data[k]
+function Cs.element:getData(k)
+	return self._data[k]
+end
+
+-- setData( key, value )
+-- NOTE: element:setData(key, value) is the same as element.data[key]=value
+function Cs.element:getData(k, v)
+	self._data[k] = v
+end
+
+-- oldDataTable = swapData( newDataTable )
+function Cs.element:swapData(data)
+	assertArgType('swapData', 1, data, 'table')
+	local oldData = self._data
+	self._data, self.data = data, data
+	return oldData
 end
 
 

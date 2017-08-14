@@ -113,6 +113,7 @@
 	- insert, remove, empty
 	- setChildrenHidden, getVisibleChild, setVisibleChild
 	- setToggledChild
+	- sort
 	- traverse, traverseType, traverseVisible
 
 		(bar)
@@ -297,12 +298,22 @@ function errorf(i, s, ...)
 	end
 end
 
--- assertArgType( functionName, argumentNumber, value, expectedValueType )
-function assertArgType(name, n, v, expectedType)
-	local vType = type(v)
-	if (vType ~= expectedType) then
-		errorf(3, "bad argument #%d to '%s' (%s expected, got %s)", n, name, expectedType, vType)
+-- value = assertArgType( functionName, argumentNumber, value, expectedValueType... )
+do
+	local function _assertArgType(depth, name, n, v, expectedType, ...)
+		local vType = type(v)
+		if (vType ~= expectedType) then
+			errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, name, expectedType, vType)
+		elseif (...) then
+			return _assertArgType(depth+1, name, n, v, ...)
+		end
+		return v
 	end
+
+	function assertArgType(name, n, v, ...)
+		return _assertArgType(4, name, n, v, ...)
+	end
+
 end
 
 
@@ -2577,6 +2588,15 @@ function Cs.container:setToggledChild(id, deep)
 			end
 		end
 	end
+end
+
+
+
+-- sort( sortFunction )
+function Cs.container:sort(f)
+	assertArgType('sort', 1, f, 'function')
+	table.sort(self, f)
+	scheduleLayoutUpdateIfDisplayed(self)
 end
 
 

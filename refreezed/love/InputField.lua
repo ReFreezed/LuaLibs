@@ -65,11 +65,12 @@
 
 
 -- Modules
-local utf8 = require('utf8')
+local utf8 = require('utf8') -- (LÖVE)
+local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- (parent folder)
 local LS = love.system
 local LT = love.timer
 
-local InputField = require('refreezed.class')('InputField', {
+local InputField = newClass('InputField', {
 
 	DOUBLE_CLICK_MAX_DELAY = 0.4,
 

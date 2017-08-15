@@ -160,9 +160,11 @@
 
 
 
-local newClass = require('refreezed.class')
-local InputField = require('refreezed.love.InputField')
+-- Modules
+local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- (parent folder)
+local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- (same folder)
 local LG = love.graphics
+
 local tau = 2*math.pi
 local defaultFont = LG.newFont(12)
 
@@ -2084,8 +2086,26 @@ end
 
 
 
--- menuelement = showMenu( items, callback [, highlightedIndex, offsetX=0, offsetY=0 ] )
-function Cs.element:showMenu(items, cb, hlI, offsetX, offsetY)
+-- menuElement = showMenu( items, [ highlightedIndex, ] [ offsetX=0, offsetY=0, ] callback )
+function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
+
+	-- items, highlightedIndex, offsetX, offsetY, callback
+	if (type(highlightI) == 'number' and type(offsetX) == 'number' and type(offsetY) == 'number') then
+		-- void
+
+	-- items, offsetX, offsetY, callback
+	elseif (type(highlightI) == 'number' and type(offsetX) == 'number') then
+		highlightI, offsetX, offsetY, cb = nil, highlightI, offsetX, offsetY
+
+	-- items, highlightedIndex, callback
+	elseif (type(highlightI) == 'number') then
+		offsetX, offsetY, cb = 0, 0, offsetX
+
+	-- items, callback
+	else
+		highlightI, offsetX, offsetY, cb = nil, 0, 0, highlightI
+	end
+
 	local root = self:getRoot()
 	local p = self.MENU_PADDING
 
@@ -2107,7 +2127,7 @@ function Cs.element:showMenu(items, cb, hlI, offsetX, offsetY)
 
 	-- Add menu items
 	for i, item in ipairs(items) do
-		local button = buttons:insert{ type='button', text=item, align='left', toggled=(i == hlI) }
+		local button = buttons:insert{ type='button', text=item, align='left', toggled=(i == highlightI) }
 		button:setCallback('press', function(button, event)
 			cb(i, item)
 			menu:remove()
@@ -2117,8 +2137,8 @@ function Cs.element:showMenu(items, cb, hlI, offsetX, offsetY)
 	-- Set position
 	buttons:_updateLayoutSize() -- (expanding and positioning of the whole menu isn't necessary right here)
 	buttons:setPosition(
-		self._layoutX+self._layoutOffsetX+(offsetX or 0)-p,
-		math.max(math.min(self._layoutY+self._layoutOffsetY+(offsetY or 0)-p, root._height-buttons._layoutHeight), 0)
+		self._layoutX+self._layoutOffsetX+offsetX-p,
+		math.max(math.min(self._layoutY+self._layoutOffsetY+offsetY-p, root._height-buttons._layoutHeight), 0)
 	)
 
 	return menu

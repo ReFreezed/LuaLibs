@@ -105,9 +105,9 @@ end
 -- errorf( [ level=1, ] formatString, ... )
 function errorf(levelOrS, s, ...)
 	if (type(levelOrS) == 'number') then
-		error(('i18n: '..s):format(...), levelOrS+1)
+		error(('[i18n] '..s):format(...), levelOrS+1)
 	else
-		error(('i18n: '..levelOrS):format(s, ...), 2)
+		error(('[i18n] '..levelOrS):format(s, ...), 2)
 	end
 end
 
@@ -143,7 +143,7 @@ function parseLanguageFile(path, langCode)
 					lines[k] = v
 				end
 			else
-				printf('i18n(%s): ignored line with unknown format: %q', langCode, line)
+				printf('[i18n] %s: ignored line with unknown format: %q', langCode, line)
 			end
 		end
 		lastK = k
@@ -212,7 +212,7 @@ function importTexts(languageLines, path)
 						field = specialFieldFilter(field)
 					end
 					if (lines[k] and not i18n.debug_preferImportedLanguageFile) then
-						-- printf('i18n(%s): ignored text key %q', langCode, k)
+						-- printf('[i18n] %s: ignored text key %q', langCode, k)
 					elseif (field ~= '') then
 						lines[k] = field
 					end

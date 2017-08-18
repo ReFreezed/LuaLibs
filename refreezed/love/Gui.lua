@@ -208,7 +208,7 @@ local coroutineIterator, newIteratorCoroutine
 local drawBackground
 local errorf, assertArgType
 local F
-local getTextHeight
+local getTextDimensions, getTextHeight
 local lerp
 local matchAll
 local retrieve
@@ -335,6 +335,14 @@ do
 end
 
 
+
+-- width, height = getTextDimensions( font, text [, wrapLimit=none ] )
+function getTextDimensions(font, text, wrapLimit)
+	local w, lineCount = font:getWrap(text, wrapLimit or math.huge)
+	lineCount = #lineCount
+	local h = font:getHeight()
+	return w, h+math.floor(h*font:getLineHeight())*(lineCount-1)
+end
 
 -- height = getTextHeight( font, text [, wrapLimit=none ] )
 function getTextHeight(font, text, wrapLimit)
@@ -1365,7 +1373,8 @@ function Cs.element:_drawTooltip()
 	end
 	local p = 3 -- padding
 	local root, font = gui._root, gui._font
-	local w, h = font:getWidth(text)+2*p, getTextHeight(font, text)+2*p
+	local w, h = getTextDimensions(font, text)
+	w, h = w+2*p, h+2*p
 	local x = math.max(math.min(self._layoutX, root._width-w), 0)
 	local y = self._layoutY+self._layoutHeight
 	if (y+h > root._height) then
@@ -3274,11 +3283,15 @@ end
 
 
 Cs.text = Cs.leaf:extend('GuiText', {
+	_textWrapLimit = nil,
 })
 
--- function Cs.text:init(gui, data, parent)
--- 	Cs.text.super.init(self, gui, data, parent)
--- end
+function Cs.text:init(gui, data, parent)
+	Cs.text.super.init(self, gui, data, parent)
+
+	retrieve(self, data, '_textWrapLimit')
+
+end
 
 
 
@@ -3317,7 +3330,11 @@ function Cs.text:_draw()
 	end
 	LG.setFont(self:getFont())
 	LG.setColor(255, 255, 255)
-	LG.print(self._text, textX, textY)
+	if (self._textWrapLimit) then
+		LG.printf(self._text, textX, textY, self._textWrapLimit, self._align)
+	else
+		LG.print(self._text, textX, textY)
+	end
 
 	self._gui:_setScissor(nil)
 
@@ -3331,8 +3348,7 @@ end
 -- _updateLayoutSize( )
 function Cs.text:_updateLayoutSize()
 	local font = self:getFont()
-	self._textWidth = font:getWidth(self._text)
-	self._textHeight = font:getHeight()
+	self._textWidth, self._textHeight = getTextDimensions(font, self._text, self._textWrapLimit)
 	self._layoutWidth = (self._width or self._textWidth+2*self.PADDING)
 	self._layoutHeight = (self._height or self._textHeight+2*self.PADDING)
 	self._layoutInnerWidth = self._layoutWidth

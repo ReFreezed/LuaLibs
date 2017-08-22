@@ -37,19 +37,11 @@
 
 --============================================================]]
 
-local error
-    = error
-local string, table
-    = string, table
-local string_find, string_format, string_gmatch, string_gsub, string_match, string_sub
-    = string.find, string.format, string.gmatch, string.gsub, string.match, string.sub
-local table_insert
-    = table.insert
-
 local ini = {}
 
 --==============================================================
 
+local table_insert = table.insert
 local function insert(t, v)
 	t = (t or {})
 	table_insert(t, v)
@@ -60,13 +52,14 @@ end
 
 -- table, sections = parse( csvString [, enableArrays=false ] )
 function ini.parse(s, enableArrays)
+	local find, match, sub = string.find, string.match, string.sub
 	local t, sections, currentSectionK = {}, {['']={}}, ''
-	for i, line in string_gmatch(s, '()(%S[^\r\n]*) *') do
+	for i, line in s:gmatch('()(%S[^\r\n]*) *') do
 
 		-- Key/value
-		local k, v = string_match(line, '^(%w.-) *= *(.*)$')
+		local k, v = match(line, '^(%w.-) *= *(.*)$')
 		if (k) then
-			if (enableArrays and string_find(k, '%[%]$')) then
+			if (enableArrays and find(k, '%[%]$')) then
 				local section = sections[currentSectionK]
 				t[k] = insert(t[k], v)
 				section[k] = insert(section[k], v)
@@ -77,18 +70,18 @@ function ini.parse(s, enableArrays)
 		else
 
 			-- Section
-			local sectionK = string_match(line, '^%[ *(..-) *%]$')
+			local sectionK = match(line, '^%[ *(..-) *%]$')
 			if (sectionK) then
 				currentSectionK = sectionK
 				sections[currentSectionK] = {}
 
 			-- Comment
-			elseif (string_sub(line, 1, 1) == ';') then
+			elseif (sub(line, 1, 1) == ';') then
 				-- void
 
 			else
-				error(string_format('bad ini line (on line %d): %q',
-					#string_gsub(string_sub(s, 1, i), '[^\n]+', '')+1, line))
+				error(('bad ini line (on line %d): %q')
+					:format(#sub(s, 1, i):gsub('[^\n]+', '')+1, line))
 			end
 		end
 	end

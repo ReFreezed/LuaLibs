@@ -37,15 +37,18 @@
 --==============================================================
 
 	-- Pre-load settings
+	addCsvColumnToIgnore, setCsvColumnsToIgnore
 	addSpecialLanguage, setSpecialLanguageTextFilter
 	ignoreLanguage
+	setCsvColumnWithKey
 	setDefaultLanguage
+	setLanguageTextFilter
 
 	-- Loading
 	load
 
 	-- Post-load access
-	get, has
+	get, has, add
 	getLanguage, setLanguage
 	getLanguageCodes
 	isSpecial
@@ -61,10 +64,12 @@ local csv = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.csv') -
 local LF = love.filesystem
 
 -- Variables
+local columnsToIgnore = {}
+local columnWithKey = 1
 local defaultLanguageCode, currentLanguageCode = 'en-US', 'en-US'
-local languageLines = {} -- (sequence and KV table)
+local fieldFilter, specialFieldFilter = nil, nil
+local languageTable = {} -- (sequence and KV table)
 local languagesToIgnore = {}
-local specialFieldFilter = nil
 local specialLanguages = {}
 
 local i18n = {
@@ -78,10 +83,13 @@ local i18n = {
 --==============================================================
 --==============================================================
 
+local cleanText
 local errorf
 local indexWith
+local printf
 
-local parseLanguageFile
+local applyFieldFilter
+local parseLanguageIniFile
 local importTexts
 
 
@@ -90,14 +98,9 @@ local importTexts
 
 
 
--- index = indexWith( table, key, value )
-function indexWith(t, k, v)
-	for i, t in ipairs(t) do
-		if (t[k] == v) then
-			return i
-		end
-	end
-	return nil
+-- text = cleanText( text )
+function cleanText(s)
+	return (s:gsub('^%s+', ''):gsub('%s+$', ''))
 end
 
 
@@ -113,108 +116,132 @@ end
 
 
 
---==============================================================
-
-
-
--- lines = parseLanguageFile( path, languageCode )
-function parseLanguageFile(path, langCode)
-
-	-- Read file
-	local contents, size = LF.read(path)
-	if (not contents) then
-		errorf('could not read language file %q', path)
-	end
-	if (size == 0) then
-		errorf('language file is empty: %q', path)
-	end
-
-	-- Parse contents
-	local lines, lastK = {}, nil
-	for line in contents:gmatch('%S[^\r\n]*') do
-		local k = nil
-		if (line:sub(1, 1) ~= ';') then
-			local v
-			k, v = line:match('^([%w_]+)%s*=%s*(.*)%s*$')
-			if (k) then
-				if (k == lastK) then
-					lines[k] = lines[k]..'\n'..v
-				else
-					lines[k] = v
-				end
-			else
-				printf('[i18n] %s: ignored line with unknown format: %q', langCode, line)
-			end
+-- index = indexWith( table, key, value )
+function indexWith(t, k, v)
+	for i, t in ipairs(t) do
+		if (t[k] == v) then
+			return i
 		end
-		lastK = k
 	end
-
-	return lines
+	return nil
 end
 
 
 
--- importTexts( languageLines, path )
-function importTexts(languageLines, path)
+-- printf( formatString, ... )
+function printf(s, ...)
+	print(('[i18n] '..s):format(...))
+end
+
+
+
+--==============================================================
+
+
+
+-- text = applyFieldFilter( text, languageCode )
+function applyFieldFilter(text, langCode)
+	if (specialLanguages[langCode]) then
+		if (specialFieldFilter) then
+			text = specialFieldFilter(text)
+		end
+	else
+		if (fieldFilter) then
+			text = fieldFilter(text)
+		end
+	end
+	return text
+end
+
+
+
+-- texts = parseLanguageIniFile( path, languageCode )
+function parseLanguageIniFile(path, langCode)
 
 	-- Read file
 	local contents, size = LF.read(path)
 	if (not contents) then
-		errorf('could not read text file %q', path)
+		errorf('could not read ini file %q', path)
+	elseif (size == 0) then
+		errorf('language ini file is empty: %q', path)
 	end
-	if (size == 0) then
-		errorf('text file is empty: %q', path)
+
+	-- Parse contents
+	local texts = {}
+	for line in contents:gmatch('%S[^\r\n]*') do
+		if (line:sub(1, 1) ~= ';') then
+			local k, text = line:match('^([-%w_./]+)%s*=(.*)$')
+			if (not k) then
+				printf('WARNING: %s: bad line format (ignored): %s', langCode, line)
+			else
+				texts[k] = applyFieldFilter(cleanText(text), langCode)
+			end
+		end
+	end
+
+	return texts
+end
+
+
+
+-- importTexts( languageTable, path )
+function importTexts(languageTable, path)
+
+	-- Read file
+	local csvStr, size = LF.read(path)
+	if (not csvStr) then
+		errorf('could not read csv file %q', path)
+	elseif (size == 0) then
+		errorf('csv file is empty: %q', path)
 	end
 
 	-- Extract texts
-	local csvTable = csv.parse(contents)
-	local lineNum, langCodes = 0, {}
-	local colsToIgnore, colWithKey = 4, 2 -- asdf
-	for _, fields in ipairs(csvTable) do
-		lineNum = lineNum+1
+	local langCodes = {}
+	for lineN, fields in ipairs(csv.parse(csvStr)) do
 
 		-- Table header
-		if (lineNum == 1) then
+		if (lineN == 1) then
 			-- void
 
 		-- Language codes
-		elseif (lineNum == 2) then
-			for col, field in ipairs(fields) do
-				field = field:gsub('^%s+', ''):gsub('%s+$', '') -- cleanup
-				-- print('line:'..lineNum, 'col:'..col, '#'..#field, '=', field)
-				if (col > colsToIgnore) then
-					local langCode = field:match('^%s*([-A-Za-z]+)')
-						or errorf('bad language code format: %s', field)
-					table.insert(langCodes, langCode)
-					if (not languageLines[langCode]) then
-						local lines = {_code=langCode}
-						languageLines[langCode] = lines
-						table.insert(languageLines, lines)
+		elseif (lineN == 2) then
+			for col, langCode in ipairs(fields) do
+				if (not columnsToIgnore[col]) then
+					langCode = cleanText(langCode)
+					if (not langCode:find('^[-a-zA-Z]+$')) then
+						errorf('bad language code format: %s', langCode)
+					end
+					langCodes[col] = langCode
+					if (not languageTable[langCode]) then
+						local texts = {_code=langCode}
+						languageTable[langCode] = texts
+						table.insert(languageTable, texts)
 					end
 				end
 			end
 
 		-- Texts
 		else
-			local col, k = 0
+			local k = nil
 			for col, field in ipairs(fields) do
-				field = field:gsub('^%s+', ''):gsub('%s+$', '') -- cleanup
-				-- print('line:'..lineNum, 'col:'..col, '#'..#field, '=', field)
-				if (col == colWithKey) then
+				field = cleanText(field)
+				if (col == columnWithKey) then
 					k = field
-				elseif (col > colsToIgnore) then
-					assert(k)
-					local langCode = langCodes[col-colsToIgnore]
-						or errorf('missing language code for line %d: %s', lineNum, line)
-					local lines = languageLines[langCode]
-						or errorf('missing language lines for code %s on line %d', langCode, line)
-					if (specialFieldFilter and i18n.isSpecial(langCode)) then
-						field = specialFieldFilter(field)
+				elseif (not columnsToIgnore[col]) then
+					if (not k) then
+						errorf('key column must be before text columns')
 					end
-					if (lines[k] and not i18n.debug_preferImportedLanguageFile) then
-						-- printf('[i18n] %s: ignored text key %q', langCode, k)
-					elseif (field ~= '') then
-						lines[k] = field
+					local langCode = langCodes[col]
+						or errorf('missing language code for column %d on line %d', col, lineN)
+					local texts = languageTable[langCode]
+						or errorf('missing text table for language code %s', langCode)
+					if (texts[k] and not i18n.debug_preferImportedLanguageFile) then
+						-- printf('NOTICE: %s: ignored text key %q', langCode, k)
+					else
+						field = applyFieldFilter(field, langCode)
+						if (field ~= '') then
+							texts[k] = field
+						end
 					end
 				end
 			end
@@ -229,6 +256,23 @@ end
 --==============================================================
 --==============================================================
 --==============================================================
+
+
+
+-- addCsvColumnToIgnore( column )
+function i18n.addCsvColumnToIgnore(col)
+	assert(type(col) == 'number')
+	columnsToIgnore[col] = true
+end
+
+-- setCsvColumnsToIgnore( columns )
+function i18n.setCsvColumnsToIgnore(cols)
+	assert(type(cols) == 'number')
+	columnsToIgnore = {}
+	for col = 1, cols do
+		columnsToIgnore[col] = true
+	end
+end
 
 
 
@@ -254,11 +298,27 @@ end
 
 
 
+-- setCsvColumnWithKey( column )
+function i18n.setCsvColumnWithKey(col)
+	assert(type(col) == 'number')
+	columnWithKey = col
+end
+
+
+
 -- setDefaultLanguage( languageCode )
 function i18n.setDefaultLanguage(langCode)
 	assert(type(langCode) == 'string')
 	defaultLanguageCode = langCode
 	currentLanguageCode = defaultLanguageCode
+end
+
+
+
+-- setLanguageTextFilter( filter:function )
+function i18n.setLanguageTextFilter(filter)
+	assert(filter == nil or type(filter) == 'function')
+	fieldFilter = filter
 end
 
 
@@ -269,36 +329,36 @@ end
 
 -- load( languageFolder, textsFilePath )
 function i18n.load(folder, path)
-	languageLines = {}
+	languageTable = {}
 
 	-- Load localization files
 	for _, name in ipairs((LF.getDirectoryItems or LF.enumerate)(folder)) do
 		local langCode = name:match('^(.+)%.ini$')
 		if (langCode) then
-			local lines = parseLanguageFile(folder..'/'..name, langCode)
-			lines._code = langCode
-			languageLines[langCode] = lines
-			table.insert(languageLines, lines)
+			local texts = parseLanguageIniFile(folder..'/'..name, langCode)
+			texts._code = langCode
+			languageTable[langCode] = texts
+			table.insert(languageTable, texts)
 		end
 	end
-	importTexts(languageLines, path)
+	importTexts(languageTable, path)
 
 	-- Remove ignored languages
 	for langCode in pairs(languagesToIgnore) do
-		if (languageLines[langCode]) then
-			languageLines[langCode] = nil
-			table.remove(languageLines, indexWith(languageLines, '_code', langCode))
+		if (languageTable[langCode]) then
+			languageTable[langCode] = nil
+			table.remove(languageTable, indexWith(languageTable, '_code', langCode))
 		end
 	end
 
 	-- Require the default code to be loaded
-	if (not languageLines[defaultLanguageCode]) then
+	if (not languageTable[defaultLanguageCode]) then
 		errorf('missing language file for default language %q', defaultLanguageCode)
 	end
 
 	-- Move default language to the beginning
-	local i = indexWith(languageLines, '_code', defaultLanguageCode)
-	table.insert(languageLines, 1, table.remove(languageLines, i))
+	local i = indexWith(languageTable, '_code', defaultLanguageCode)
+	table.insert(languageTable, 1, table.remove(languageTable, i))
 
 end
 
@@ -312,11 +372,11 @@ do
 	local string_find, string_gsub, type = string.find, string.gsub, type
 
 	local function getSpecified(k, langCode, fallback)
-		return (languageLines[langCode][k] or fallback)
+		return (languageTable[langCode][k] or fallback)
 	end
 
 	local function getCurrent(k, langCode, fallback)
-		return (languageLines[currentLanguageCode][k] or languageLines[defaultLanguageCode][k] or fallback)
+		return (languageTable[currentLanguageCode][k] or languageTable[defaultLanguageCode][k] or fallback)
 	end
 
 	-- text = get( textKey [, languageCode=current ] )
@@ -362,6 +422,27 @@ do
 		return (get(k, langCode, nil) ~= nil)
 	end
 
+	-- add( textKey, [ languageCode=defaultLanguageCode, ] text )
+	function i18n.add(k, langCode, text)
+		if (text == nil) then
+			k, langCode, text = k, defaultLanguageCode, langCode
+		end
+		if (type(k) ~= 'string') then
+			errorf(2, 'bad text key %q', tostring(k))
+		end
+		if (type(text) ~= 'string') then
+			errorf(2, 'bad text argument type %q', type(text))
+		end
+		local texts = languageTable[langCode]
+		if (not texts) then
+			errorf(2, 'bad language code %q', tostring(langCode))
+		end
+		if (texts[k]) then
+			errorf(2, 'text key %q is already occupied in language %q', k, langCode)
+		end
+		texts[k] = applyFieldFilter(text, langCode)
+	end
+
 end
 
 
@@ -373,7 +454,7 @@ end
 
 -- success, errorMessage = setLanguage( languageCode )
 function i18n.setLanguage(langCode)
-	if (not languageLines[langCode]) then
+	if (not languageTable[langCode]) then
 		return false, ('no language with code %q'):format(tostring(langCode))
 	end
 	currentLanguageCode = langCode
@@ -385,8 +466,8 @@ end
 -- languageCodes = getLanguageCodes( )
 function i18n.getLanguageCodes()
 	local langCodes = {}
-	for _, lines in ipairs(languageLines) do
-		table.insert(langCodes, lines._code)
+	for _, texts in ipairs(languageTable) do
+		table.insert(langCodes, texts._code)
 	end
 	return langCodes
 end
@@ -395,7 +476,7 @@ end
 
 -- state = isSpecial( [ languageCode=current ] )
 function i18n.isSpecial(langCode)
-	if (langCode and not languageLines[langCode]) then
+	if (langCode and not languageTable[langCode]) then
 		errorf(2, 'no language with code %q', tostring(langCode))
 	end
 	return (specialLanguages[langCode or currentLanguageCode] or false)
@@ -406,20 +487,18 @@ end
 -- characters:table = getCharacters( [ ignoreSpecial=false, keyFilter:function ] )
 -- characters:table = getCharacters( languageCode [, keyFilter:function ] )
 do
-	local utf8Codes = utf8.codes
-
 	local function addCodepoints(codepointsSet, s)
-		for pos, cp in utf8Codes(s) do
+		for pos, cp in utf8.codes(s) do
 			if (cp >= 32) then -- ignore common control characters
 				codepointsSet[cp] = true
 			end
 		end
 	end
 
-	local function getCodepoints(lines, codepointsSet, keyFilter)
-		for k, line in pairs(lines) do
+	local function getCodepoints(texts, codepointsSet, keyFilter)
+		for k, text in pairs(texts) do
 			if not (keyFilter and keyFilter(k)) then
-				addCodepoints(codepointsSet, line)
+				addCodepoints(codepointsSet, text)
 			end
 		end
 	end
@@ -429,17 +508,17 @@ do
 
 		-- Single language
 		if (type(ignoreSpecialOrLangCode) == 'string') then
-			local lines = languageLines[ignoreSpecialOrLangCode]
-			if (not lines) then
+			local texts = languageTable[ignoreSpecialOrLangCode]
+			if (not texts) then
 				errorf(2, 'no language with code %q', ignoreSpecialOrLangCode)
 			end
-			getCodepoints(lines, codepointsSet, keyFilter)
+			getCodepoints(texts, codepointsSet, keyFilter)
 
 		-- All languages
 		else
-			for _, lines in ipairs(languageLines) do
-				if not (ignoreSpecialOrLangCode and i18n.isSpecial(lines._code)) then
-					getCodepoints(lines, codepointsSet, keyFilter)
+			for _, texts in ipairs(languageTable) do
+				if not (ignoreSpecialOrLangCode and i18n.isSpecial(texts._code)) then
+					getCodepoints(texts, codepointsSet, keyFilter)
 				end
 			end
 
@@ -451,7 +530,7 @@ do
 		table.sort(codepoints)
 		local chars = {}
 		for i, cp in ipairs(codepoints) do
-			chars[i] = utf8.from32{cp}
+			chars[i] = utf8.char(cp)
 		end
 		return chars
 	end

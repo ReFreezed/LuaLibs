@@ -63,7 +63,19 @@ local M = {
 --==============================================================
 --==============================================================
 
+local getKeys
 local indexOf
+
+
+
+-- keys = getKeys( table )
+function getKeys(t)
+	local keys = {}
+	for k in pairs(t) do
+		keys[#keys+1] = k
+	end
+	return keys
+end
 
 
 
@@ -108,7 +120,9 @@ function M.createBitmapFont(sourceFont, charTable, padH, padT, padB, shader)
 			table.insert(missingChars, table.remove(charTable, i))
 		end
 	end
-	reLua.setKeysIdentical(allChars, charTable, true)
+	for _, c in ipairs(charTable) do
+		allChars[c] = true
+	end
 
 	-- Export missing characters
 	if (M.debug_exportMissingChars and missingChars[1]) then
@@ -116,7 +130,7 @@ function M.createBitmapFont(sourceFont, charTable, padH, padT, padB, shader)
 		error('chars are missing')
 	end
 
-	allChars = reLua.getKeys(allChars)
+	allChars = getKeys(allChars)
 	table.sort(allChars) -- (not really needed, but looks nicer...)
 	local allCharsStr = table.concat(allChars)
 
@@ -206,7 +220,7 @@ function M.createBitmapFont(sourceFont, charTable, padH, padT, padB, shader)
 		fonts[canvasI] = LG.newImageFont(fontImage, fontCanvasesCharsStr[canvasI], 2)
 	end
 	if (M.debug_exportBitmapFonts) then
-		error('ALL GOOD - fonts exported')
+		error('[DEBUG] Fonts exported - exiting app')
 	end
 	M.setFallbacks(unpack(fonts))
 
@@ -326,7 +340,7 @@ function M.newOutlineBitmapFont(sourceFont, allCharsStr)
 		fonts[canvasI] = LG.newImageFont(fontImage, fontCanvasesCharsStr[canvasI], -1)
 	end
 	if (M.debug_exportBitmapFonts) then
-		error('ALL GOOD - fonts exported')
+		error('[DEBUG] Fonts exported - exiting app')
 	end
 	M.setFallbacks(unpack(fonts))
 

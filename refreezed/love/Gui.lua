@@ -338,10 +338,9 @@ end
 
 -- width, height = getTextDimensions( font, text [, wrapLimit=none ] )
 function getTextDimensions(font, text, wrapLimit)
-	local w, lineCount = font:getWrap(text, wrapLimit or math.huge)
-	lineCount = #lineCount
+	local w, lines = font:getWrap(text, (wrapLimit or math.huge))
 	local h = font:getHeight()
-	return w, h+math.floor(h*font:getLineHeight())*(lineCount-1)
+	return w, h+math.floor(h*font:getLineHeight())*(math.max(#lines, 1)-1)
 end
 
 -- height = getTextHeight( font, text [, wrapLimit=none ] )

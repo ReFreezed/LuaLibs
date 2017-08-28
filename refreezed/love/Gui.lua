@@ -128,6 +128,7 @@
 	(leaf)
 	- getFont
 	- getText, setText
+	- getTextColor, setTextColor
 
 		image
 		- getImageBackgroundColor, setImageBackgroundColor
@@ -3058,6 +3059,7 @@ Cs.leaf = Cs.element:extend('GuiLeaf', {
 	_bold = false, _small = false,
 	_mnemonics = false,
 	_text = '',
+	_textColor = nil,
 
 })
 
@@ -3068,6 +3070,7 @@ function Cs.leaf:init(gui, data, parent)
 	retrieve(self, data, '_bold', '_small')
 	retrieve(self, data, '_mnemonics')
 	-- retrieve(self, data, '_text')
+	retrieve(self, data, '_textColor')
 
 	if (data.text) then
 		self:setText(data.text)
@@ -3118,6 +3121,11 @@ function Cs.leaf:setText(text)
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
 end
+
+
+
+-- getTextColor, setTextColor
+Cs.leaf:define('_textColor')
 
 
 
@@ -3328,7 +3336,7 @@ function Cs.text:_draw()
 		textX = midX-math.floor(self._textWidth/2)
 	end
 	LG.setFont(self:getFont())
-	LG.setColor(255, 255, 255)
+	LG.setColor(self._textColor or {255,255,255})
 	if (self._textWrapLimit) then
 		LG.printf(self._text, textX, textY, self._textWrapLimit, self._align)
 	else

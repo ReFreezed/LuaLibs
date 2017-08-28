@@ -107,7 +107,7 @@
 	- getElementAt
 	- getMaxWidth, setMaxWidth, getMaxHeight, setMaxHeight
 	- getPadding, setPadding
-	- getScroll, setScroll, updateScroll
+	- getScroll, setScroll, scroll, updateScroll
 	- getVisibleChild, getVisibleChildIndex, getVisibleChildCount
 	- indexOf
 	- insert, remove, empty
@@ -628,6 +628,12 @@ function Gui:update(dt)
 	local root = self._root
 	if (root) then
 		root:_update(dt)
+		if (root:isVisible()) then
+			root:trigger('update')
+			for el in root:traverseVisible() do
+				el:trigger('update')
+			end
+		end
 	end
 
 	-- Check if mouse is inside window
@@ -888,7 +894,7 @@ do
 				local distSquared = dx*dx+dy*dy
 				local angDiff = math.atan2(dy, dx)-targetAng
 				angDiff = math.abs(math.atan2(math.sin(angDiff), math.cos(angDiff)))
-				if (angDiff < tau/4 and distSquared < closestDistSquared) then
+				if (angDiff < tau/4 and distSquared <= closestDistSquared) then
 					closestEl, closestDistSquared, closestAngDiff = el, distSquared, angDiff
 				end
 			end
@@ -2409,10 +2415,15 @@ function Cs.container:setScroll(scrollX, scrollY)
 	end
 end
 
+-- scroll( deltaX, deltaY )
+function Cs.container:scroll(dx, dy)
+	self:setScroll(self._scrollX+dx, self._scrollY+dy)
+end
+
 -- updateScroll( )
 -- TODO: Update scrolls automatically when elements change size etc.
 function Cs.container:updateScroll()
-	self:setScroll(self._scrollX, self._scrollY)
+	self:scroll(0, 0)
 end
 
 
@@ -2563,7 +2574,7 @@ end
 -- handled = _mouseWheel( deltaX, deltaY )
 function Cs.container:_mouseWheel(dx, dy)
 	if (dx ~= 0 and self._maxWidth) or (dy ~= 0 and self._maxHeight) then
-		self:setScroll(self._scrollX+self.SCROLL_SPEED_X*dx, self._scrollY+self.SCROLL_SPEED_Y*dy)
+		self:scroll(self.SCROLL_SPEED_X*dx, self.SCROLL_SPEED_Y*dy)
 		return true
 	end
 	return false

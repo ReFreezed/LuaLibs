@@ -46,8 +46,9 @@
 	getServerPing
 
 	getMaxPeers, setMaxPeers
-	getPort, setPort
+	getPort, setPort, isPortValid
 	getServerIp, setServerIp
+	printf
 	stop, isActive
 
 --============================================================]]
@@ -58,6 +59,8 @@ local enet = require('enet') -- (LÖVE)
 local json = require(((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', ''))) -- (grandparent folder)
 
 local network = {
+
+	MIN_PORT = 1024, MAX_PORT = 65535,
 
 	-- Settings
 	_maxPeers = 64,
@@ -71,9 +74,9 @@ local network = {
 	-- Event callbacks
 	onClientAdded = nil, -- function( clientId )
 	onClientRemoved = nil, -- function( clientId )
-	onReceiveClientMessage = nil, -- function( data, clientId )
 	onReceiveMessage = nil, -- function( data [, clientId ] )
-	onReceiveServerMessage = nil, -- function( data )
+	onReceiveMessageFromClient = nil, -- function( data, clientId )
+	onReceiveMessageFromServer = nil, -- function( data )
 	onServerConnect = nil, -- function( )
 	onServerDisconnect = nil, -- function( )
 
@@ -116,16 +119,16 @@ end
 
 
 
--- disconnectClientAtIndex( index [, when, code ] )
+-- disconnectClientAtIndex( index [, when, code=0 ] )
 -- when: "now"|"later"|nil
-function disconnectClientAtIndex(i, when, ...)
+function disconnectClientAtIndex(i, when, code)
 	local client = network._connectedClients[i]
 		or error('bad client peer index '..tostring(i))
 	local peer = client.peer
 	local method = peer['disconnect'..(when and '_'..when or '')]
 		or error('bad "when" argument '..tostring(when))
-	printf('Disconnecting client %s (%d)', client.address, (... or 0))
-	method(peer, ...)
+	printf('Disconnecting client %s (%d)', client.address, (code or 0))
+	method(peer, (code or 0))
 	forgetClientAtIndex(i)
 end
 
@@ -280,17 +283,17 @@ function network.update()
 			local encodedData = e.data
 			printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
 			local data, err = decode(encodedData)
-			if (not data) then
+			if (err) then
 				printf('Error: Could not decode message from %s: %s', tostring(peer), err)
 			else
 
 				if (network._isServer) then
-					local id = peer:connect_id()
-					trigger('onReceiveClientMessage', data, id)
-					trigger('onReceiveMessage', data, id)
+					local cid = peer:connect_id()
+					trigger('onReceiveMessageFromClient', data, cid)
+					trigger('onReceiveMessage', data, cid)
 
 				elseif (network._isClient) then
-					trigger('onReceiveServerMessage', data)
+					trigger('onReceiveMessageFromServer', data)
 					trigger('onReceiveMessage', data, nil)
 				end
 			end
@@ -329,9 +332,9 @@ function network.startServer()
 	return true
 end
 
--- success, errorMessage = stopServer( [ code ] )
-function network.stopServer(...)
-	assert(... == nil or type(...) == 'number')
+-- success, errorMessage = stopServer( [ code=0 ] )
+function network.stopServer(code)
+	assert(code == nil or type(code) == 'number')
 	if (not network._isServer) then
 		return false, 'we are not a server'
 	end
@@ -339,7 +342,7 @@ function network.stopServer(...)
 
 	-- Disconnect all clients
 	for i = #network._connectedClients, 1, -1 do
-		disconnectClientAtIndex(i, nil, ...)
+		disconnectClientAtIndex(i, nil, (code or 0))
 	end
 	network._host:flush() -- (probably not needed since all clients are disconnected already)
 
@@ -381,9 +384,9 @@ end
 
 
 
--- success, errorMessage = sendToClient( clientId, data )
-function network.sendToClient(id, data)
-	-- assert(type(id) == 'number')
+-- success, errorMessage = sendToClient( clientId, data [, channel=1, flag="reliable" ] )
+function network.sendToClient(cid, data)
+	-- assert(type(cid) == 'number')
 	if (not network._isServer) then
 		return false, 'we are not a server'
 	end
@@ -391,12 +394,12 @@ function network.sendToClient(id, data)
 	if (not encodedData) then
 		return false, err
 	end
-	local client = itemWith(network._connectedClients, 'id', id)
+	local client = itemWith(network._connectedClients, 'id', cid)
 	if (not client) then
-		return false, 'no client with id '..tostring(id)
+		return false, 'no client with ID '..tostring(cid)
 	end
 	printf('Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
-	client.peer:send(encodedData)
+	client.peer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end
 
@@ -418,25 +421,25 @@ end
 
 
 
--- success, errorMessage = disconnectClient( clientId [, code ] )
-function network.disconnectClient(id, ...)
-	-- assert(type(id) == 'number')
-	assert(... == nil or type(...) == 'number')
+-- success, errorMessage = disconnectClient( clientId [, code=0 ] )
+function network.disconnectClient(cid, code)
+	-- assert(type(cid) == 'number')
+	assert(code == nil or type(code) == 'number')
 	if (not network._isServer) then
 		return false, 'we are not a server'
 	end
-	local client, i = itemWith(network._connectedClients, 'id', id)
+	local client, i = itemWith(network._connectedClients, 'id', cid)
 	if (not client) then
-		return false, 'no client with id '..tostring(id)
+		return false, 'no client with ID '..tostring(cid)
 	end
-	disconnectClientAtIndex(i, nil, ...)
+	disconnectClientAtIndex(i, nil, (code or 0))
 	return true
 end
 
--- success, errorMessage = kickClient( clientId, data [, code ] )
-function network.kickClient(id, data, ...)
-	-- assert(type(id) == 'number')
-	assert(... == nil or type(...) == 'number')
+-- success, errorMessage = kickClient( clientId, data [, code=0 ] )
+function network.kickClient(cid, data, code)
+	-- assert(type(cid) == 'number')
+	assert(code == nil or type(code) == 'number')
 	if (not network._isServer) then
 		return false, 'we are not a server'
 	end
@@ -444,29 +447,30 @@ function network.kickClient(id, data, ...)
 	if (not encodedData) then
 		return false, err
 	end
-	local client, i = itemWith(network._connectedClients, 'id', id)
+	local client, i = itemWith(network._connectedClients, 'id', cid)
 	if (not client) then
-		return false, 'no client with id '..tostring(id)
+		return false, 'no client with ID '..tostring(cid)
 	end
 	printf('Queuing disconnection of client %s (%d) with message: %s',
-		client.address, (... or 0), getDataStringSummary(encodedData))
+		client.address, (code or 0), getDataStringSummary(encodedData))
 	client.peer:send(encodedData)
-	disconnectClientAtIndex(i, 'later', ...) -- "later" needed for message to arrive
+	disconnectClientAtIndex(i, 'later', (code or 0)) -- "later" needed for message to arrive
 	network._host:flush()
 	return true
 end
 
 
 
--- delay, errorMessage = getClientPing( clientId )
-function network.getClientPing(id)
-	-- assert(type(id) == 'number')
+-- ping, errorMessage = getClientPing( clientId )
+-- ping: Delay in seconds
+function network.getClientPing(cid)
+	-- assert(type(cid) == 'number')
 	if (not network._isServer) then
 		return nil, 'we are not a server'
 	end
-	local client = itemWith(network._connectedClients, 'id', id)
+	local client = itemWith(network._connectedClients, 'id', cid)
 	if (not client) then
-		return nil, 'no client with id '..tostring(id)
+		return nil, 'no client with ID '..tostring(cid)
 	end
 	return client.peer:last_round_trip_time()*0.001
 end
@@ -485,7 +489,11 @@ function network.startClient()
 		return false, 'host already created'
 	end
 	printf('Starting client...')
-	network._host = enet.host_create()
+	local host, err = enet.host_create()
+	if (not host) then
+		printf('Could not create host - client start aborted')
+		return false, err
+	end
 	network._isClient = true
 	printf('Client started')
 	return true
@@ -529,16 +537,16 @@ function network.connectToServer()
 	return true
 end
 
--- success, errorMessage = network.disconnectFromServer( [ code ] )
-function network.disconnectFromServer(...)
-	assert(... == nil or type(...) == 'number')
+-- success, errorMessage = network.disconnectFromServer( [ code=0 ] )
+function network.disconnectFromServer(code)
+	assert(code == nil or type(code) == 'number')
 	if (not network._isClient) then
 		return false, 'we are not a client'
 	elseif (not network._serverPeer) then
 		return false, 'not connected to any server'
 	end
 	printf('Disconnecting from server...')
-	network._serverPeer:disconnect_now(...) -- TODO: Figure out how to use disconnect+flush instead of disconnect_now
+	network._serverPeer:disconnect_now(code or 0) -- TODO: Figure out how to use disconnect+flush instead of disconnect_now
 	-- network._host:flush()
 	if (network._isConnectedToServer) then
 		trigger('onServerDisconnect')
@@ -561,7 +569,7 @@ end
 
 
 
--- success, errorMessage = sendToServer( data )
+-- success, errorMessage = sendToServer( data [, channel=1, flag="reliable" ] )
 function network.sendToServer(data)
 	if (not network._isClient) then
 		return false, 'we are not a client'
@@ -573,13 +581,14 @@ function network.sendToServer(data)
 		return nil, err
 	end
 	printf('Sending message to server: %s', getDataStringSummary(encodedData))
-	network._serverPeer:send(encodedData)
+	network._serverPeer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end
 
 
 
--- delay, errorMessage = getServerPing( )
+-- ping, errorMessage = getServerPing( )
+-- ping: Delay in seconds
 function network.getServerPing()
 	if (not network._isClient) then
 		return nil, 'we are not a client'
@@ -618,11 +627,16 @@ end
 
 -- setPort( port )
 function network.setPort(port)
-	assert(type(port) == 'number' and port >= 1024 and port <= 65535)
+	assert(network.isPortValid(port))
 	if (network._isServer) or (network._isClient and network._serverPeer) then
 		printf('WARNING: Port changed while being a server or a connected client')
 	end
 	network._port = port
+end
+
+-- result = isPortValid( port )
+function network.isPortValid(port)
+	return (type(port) == 'number' and port >= network.MIN_PORT and port <= network.MAX_PORT)
 end
 
 
@@ -641,6 +655,11 @@ function network.setServerIp(ip)
 	end
 	network._serverIp = ip
 end
+
+
+
+-- printf( formatString, ... )
+network.printf = printf
 
 
 

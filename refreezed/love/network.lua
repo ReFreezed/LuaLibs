@@ -68,7 +68,7 @@ local network = {
 
 	_connectedClients = {},
 	_host = nil,
-	_isConnectedToServer = false, _serverPeer = nil,
+	_isConnectedToServer = false, _isTryingToConnectToServer = false, _serverPeer = nil,
 	_isServer = false, _isClient = false,
 
 	-- Event callbacks
@@ -255,6 +255,7 @@ function network.update()
 			elseif (network._isClient) then
 				printf('Event: Connected to server: %s (%d)', tostring(network._serverPeer), code)
 				network._isConnectedToServer = true
+				network._isTryingToConnectToServer = false
 				trigger('onServerConnect')
 			end
 
@@ -270,7 +271,7 @@ function network.update()
 				end
 
 			elseif (network._isClient) then
-				if (not network._isConnectedToServer) then
+				if not (network._isConnectedToServer or network._isTryingToConnectToServer) then
 					printf('WARNING: Non-server peer disconnected: %s (%d)', tostring(peer), code)
 				else
 					printf('Event: Server disconnected: %s (%d)', tostring(peer), code)
@@ -314,14 +315,12 @@ function network.startServer()
 		return false, 'we are already a server'
 	elseif (network._host) then
 		return false, 'host already created'
-	end
-	local port = network._port
-	if (port == 0) then
+	elseif (network._port == 0) then
 		return false, 'port has not been set'
 	end
 	printf('Starting server...')
 	-- Note: Trying to start two servers on the same host results in failure here
-	local host, err = enet.host_create('*:'..port, network._maxPeers)
+	local host, err = enet.host_create('*:'..network._port, network._maxPeers)
 	if (not host) then
 		printf('Could not create host - server start aborted')
 		return false, err
@@ -494,6 +493,7 @@ function network.startClient()
 		printf('Could not create host - client start aborted')
 		return false, err
 	end
+	network._host = host
 	network._isClient = true
 	printf('Client started')
 	return true
@@ -524,15 +524,16 @@ end
 function network.connectToServer()
 	if (not network._isClient) then
 		return false, 'we are not a client'
-	elseif (network._serverPeer) then
+	elseif (network._isConnectedToServer) then
 		return false, 'already connected to server'
-	end
-	local port = network._port
-	if (port == 0) then
+	elseif (network._serverPeer) then
+		return false, 'already connecting to server'
+	elseif (network._port == 0) then
 		return false, 'port has not been set'
 	end
 	printf('Connecting to server...')
-	network._serverPeer = assert(network._host:connect(network._serverIp..':'..port))
+	network._serverPeer = assert(network._host:connect(network._serverIp..':'..network._port))
+	network._isTryingToConnectToServer = true
 	printf('Target server: %s', tostring(network._serverPeer))
 	return true
 end
@@ -552,6 +553,7 @@ function network.disconnectFromServer(code)
 		trigger('onServerDisconnect')
 	end
 	network._isConnectedToServer = false
+	network._isTryingToConnectToServer = false
 	network._serverPeer = nil
 	printf('Disconnected from server')
 	return true
@@ -663,13 +665,14 @@ network.printf = printf
 
 
 
--- stop( )
+-- success, errorMessage = stop( )
 function network.stop()
 	if (network._isServer) then
-		network.stopServer()
+		return network.stopServer()
 	elseif (network._isClient) then
-		network.stopClient()
+		return network.stopClient()
 	end
+	return false, 'network is not active'
 end
 
 -- state = isActive( )

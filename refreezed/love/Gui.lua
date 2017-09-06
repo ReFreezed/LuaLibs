@@ -88,6 +88,7 @@
 	- isHidden, isVisible, setHidden, setVisible, show, hide, toggleHidden
 	- isHovered
 	- isMouseFocus, isKeyboardFocus
+	- isNavigationTarget
 	- isSolid
 	- isType
 	- refresh
@@ -126,9 +127,12 @@
 		- setDimensions
 
 	(leaf)
+	- getAlign, setAlign
 	- getFont
 	- getText, setText
 	- getTextColor, setTextColor
+	- isBold, setBold
+	- isSmall, setSmall
 
 		image
 		- getImageBackgroundColor, setImageBackgroundColor
@@ -2017,6 +2021,13 @@ end
 
 
 
+-- state = isNavigationTarget( )
+function Cs.element:isNavigationTarget()
+	return (self == self._gui._navigationTarget)
+end
+
+
+
 -- state = isSolid( )
 function Cs.element:isSolid()
 	return false
@@ -3091,6 +3102,12 @@ end
 
 
 
+-- getAlign, setAlign
+-- Note: We shouldn't have to update layout after changing text alignment
+Cs.leaf:define('_align')
+
+
+
 -- font = getFont( )
 function Cs.leaf:getFont()
 	return self._gui[self._small and '_smallFont' or self._bold and '_boldFont' or '_font']
@@ -3137,6 +3154,38 @@ end
 
 -- getTextColor, setTextColor
 Cs.leaf:define('_textColor')
+
+
+
+-- state = isBold( )
+function Cs.leaf:isBold(text)
+	return self._bold
+end
+
+-- setBold( state )
+function Cs.leaf:setBold(state)
+	if (self._bold == state) then
+		return
+	end
+	self._bold = state
+	scheduleLayoutUpdateIfDisplayed(self)
+end
+
+
+
+-- state = isSmall( )
+function Cs.leaf:isSmall(text)
+	return self._small
+end
+
+-- setSmall( state )
+function Cs.leaf:setSmall(state)
+	if (self._small == state) then
+		return
+	end
+	self._small = state
+	scheduleLayoutUpdateIfDisplayed(self)
+end
 
 
 

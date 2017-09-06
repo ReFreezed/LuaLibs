@@ -48,7 +48,6 @@
 	getMaxPeers, setMaxPeers
 	getPort, setPort, isPortValid
 	getServerIp, setServerIp
-	printf
 	stop, isActive
 
 --============================================================]]
@@ -187,6 +186,7 @@ function printf(s, ...)
 	local hostType = (network._isServer and '.server') or (network._isClient and '.client') or ''
 	print('[network'..hostType..'] '..s:format(...))
 end
+network._printf = printf -- expose to network module extensions
 
 
 
@@ -213,6 +213,7 @@ function trigger(k, ...)
 	end
 	return cb(...)
 end
+network._trigger = trigger -- expose to network module extensions
 
 
 
@@ -657,11 +658,6 @@ function network.setServerIp(ip)
 	end
 	network._serverIp = ip
 end
-
-
-
--- printf( formatString, ... )
-network.printf = printf
 
 
 

@@ -55,7 +55,7 @@
 
 
 local enet = require('enet') -- (LÖVE)
-local json = require(((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', ''))) -- (grandparent folder)
+local json = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
 
 local network = {
 

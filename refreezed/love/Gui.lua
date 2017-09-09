@@ -5,7 +5,9 @@
 --=  Dependencies:
 --=  - LÖVE 0.10.2
 --=  - refreezed.class
+--=  - refreezed.love.Animation (unavailable in LuaLibs!)
 --=  - refreezed.love.InputField
+--=  - refreezed.love.Sprite (unavailable in LuaLibs!)
 --=
 --=-------------------------------------------------------------
 --=
@@ -44,12 +46,14 @@
 	blur
 	defineStyle
 	find, findAll, findActive, findToggled
+	getDefaultSound, setDefaultSound
 	getElementAt
 	getFont, setFont, getBoldFont, setBoldFont, getSmallFont, setSmallFont
 	getHoveredElement
 	getNavigationTarget, navigateTo, navigateToFirst, navigate
 	getRoot
 	getScissorCoordsConverter, setScissorCoordsConverter
+	getSoundPlayer, setSoundPlayer
 	getSpriteLoader, setSpriteLoader
 	getTarget, getTargetCallback, setTargetCallback
 	isBusy, isMouseBusy
@@ -82,6 +86,7 @@
 	- getPathDescription
 	- getPosition, setPosition, getX, setX, getY, setY
 	- getRoot
+	- getSound, getResultingSound, setSound
 	- getTooltip, setTooltip
 	- isAt
 	- isDisplayed, getClosestHiddenElement, getFarthestHiddenElement
@@ -177,6 +182,7 @@ local Gui = newClass('Gui', {
 
 	TOOLTIP_DELAY = 0.15,
 
+	_defaultSounds = {},
 	_font = defaultFont, _boldFont = defaultFont, _smallFont = defaultFont,
 	_hoveredElement = nil,
 	_ignoreKeyboardInputThisFrame = false,
@@ -191,6 +197,7 @@ local Gui = newClass('Gui', {
 	_navigationTarget = nil, _timeSinceNavigation = 0.0,
 	_root = nil,
 	_scissorCoordsConverter = nil,
+	_soundPlayer = nil,
 	_spriteLoader = nil,
 	_styles = nil,
 	_time = 0.0,
@@ -200,7 +207,20 @@ local Gui = newClass('Gui', {
 
 })
 
-local Cs = {}
+local Cs = {} -- gui element Classes
+
+local validSoundKeys = {
+
+	-- Generic
+	['close'] = true, -- usually containers
+	['focus'] = true, -- (only used by inputs so far)
+	['press'] = true, -- buttons
+	['scroll'] = true, -- containers
+
+	-- Element specific
+	['inputsubmit'] = true, ['inputrevert'] = true,
+
+}
 
 
 
@@ -209,6 +229,8 @@ local Cs = {}
 --==============================================================
 
 local applyStyle
+local checkValidSoundKey
+local copyTable
 local coroutineIterator, newIteratorCoroutine
 local drawBackground
 local errorf, assertArgType
@@ -216,6 +238,7 @@ local F
 local getTextDimensions, getTextHeight
 local lerp
 local matchAll
+local playSound, prepareSound
 local retrieve
 local reverseArray
 local round
@@ -246,6 +269,32 @@ function applyStyle(data, styleData)
 			data[k] = v
 		end
 	end
+end
+
+
+
+-- checkValidSoundKey( soundKey )
+function checkValidSoundKey(soundK)
+	if (soundK == nil or validSoundKeys[soundK]) then
+		return
+	end
+	local keys = {}
+	for soundK in pairs(validSoundKeys) do
+		table.insert(keys, soundK)
+	end
+	table.sort(keys)
+	errorf(2, 'bad sound key %q (must be any of "%s")', tostring(soundK), table.concat(keys, '", "'))
+end
+
+
+
+-- copy = copyTable( table )
+function copyTable(t)
+	local copy = {}
+	for k, v in pairs(t) do
+		copy[k] = v
+	end
+	return copy
 end
 
 
@@ -379,6 +428,31 @@ function matchAll(s, pat)
 		matches[i] = match
 	end
 	return matches
+end
+
+
+
+-- playSound( element, soundKey )
+function playSound(el, soundK)
+	local gui = el._gui
+	local soundPlayer = (gui and gui._soundPlayer)
+	local sound = (soundPlayer and el:getResultingSound(soundK))
+	if (sound ~= nil) then
+		soundPlayer(sound)
+	end
+end
+
+-- Prepare a sound for being played (Useful if it's possible the element will be removed in an event)
+-- playSound:function = prepareSound( element, soundKey )
+function prepareSound(el, soundK)
+	local gui = el._gui
+	local soundPlayer = (gui and gui._soundPlayer)
+	local sound = (soundPlayer and el:getResultingSound(soundK))
+	return function()
+		if (sound ~= nil) then
+			soundPlayer(sound)
+		end
+	end
 end
 
 
@@ -616,6 +690,7 @@ end
 
 -- Gui( )
 function Gui:init()
+	self._defaultSounds = {}
 	self._mouseFocusSet = {}
 	self._styles = {}
 end
@@ -752,6 +827,24 @@ end
 function Gui:findToggled()
 	local root = self._root
 	return (root and root:findToggled())
+end
+
+
+
+-- sound = getDefaultSound( soundKey )
+function Gui:getDefaultSound(soundK)
+	assertArgType('soundKey', 1, soundK, 'string')
+	checkValidSoundKey(soundK)
+	return self._defaultSounds[soundK]
+end
+
+-- setDefaultSound( soundKey, sound )
+-- setDefaultSound( soundKey, nil ) -- remove sound
+-- Note: 'sound' is the value sent to the GUI sound player callback
+function Gui:setDefaultSound(soundK, sound)
+	assertArgType('soundKey', 1, soundK, 'string')
+	checkValidSoundKey(soundK)
+	self._defaultSounds[soundK] = sound
 end
 
 
@@ -925,7 +1018,14 @@ Gui:define('_scissorCoordsConverter')
 
 
 
+-- getSoundPlayer, setSoundPlayer
+-- soundPlayer( sound )
+Gui:define('_soundPlayer')
+
+
+
 -- getSpriteLoader, setSpriteLoader
+-- sprite = spriteLoader( spriteName )
 Gui:define('_spriteLoader')
 
 
@@ -1266,6 +1366,7 @@ Cs.element = newClass('GuiElement', {
 	_margin = 0, _marginVertical = nil, _marginHorizontal = nil,
 	_marginTop = nil, _marginRight = nil, _marginBottom = nil, _marginLeft = nil,
 	_originX = 0.0, _originY = 0.0, -- where in the parent to base x and y off
+	_sounds = nil,
 	_tooltip = '',
 	_width = nil, _height = nil,
 	_x = 0, _y = 0, -- offset from origin
@@ -1297,12 +1398,25 @@ function Cs.element:init(gui, data, parent)
 	retrieve(self, data, '_margin', '_marginVertical', '_marginHorizontal')
 	retrieve(self, data, '_marginTop', '_marginRight', '_marginBottom', '_marginLeft')
 	retrieve(self, data, '_originX', '_originY')
+	-- retrieve(self, data, '_sounds')
 	retrieve(self, data, '_tooltip')
 	retrieve(self, data, '_width', '_height')
 	retrieve(self, data, '_x', '_y')
 
+	-- Set data table
+	assert(data.data == nil or type(data.data) == 'table')
 	self._data = (data.data or {})
-	self.data = self._data
+	self.data = self._data -- element.data is exposed for easy access
+
+	-- Set sounds table
+	self._sounds = {}
+	if (data.sounds ~= nil) then
+		assert(type(data.sounds) == 'table')
+		for soundK, sound in pairs(data.sounds) do
+			checkValidSoundKey(soundK)
+			self._sounds[soundK] = sound
+		end
+	end
 
 	-- Make sure the element has an ID
 	if (self._id == '') then
@@ -1411,11 +1525,13 @@ function Cs.element:close()
 	if (not self:canClose()) then
 		return false
 	end
+	local preparedSound = prepareSound(self, 'close')
 	if (self:trigger('close')) then
 		return false -- (suppress default behavior)
 	end
-	self:triggerBubbling('closed', self)
+	preparedSound()
 	self:hide()
+	self:triggerBubbling('closed', self)
 	return true
 end
 
@@ -1527,7 +1643,7 @@ end
 
 -- setData( key, value )
 -- NOTE: element:setData(key, value) is the same as element.data[key]=value
-function Cs.element:getData(k, v)
+function Cs.element:setData(k, v)
 	self._data[k] = v
 end
 
@@ -1851,6 +1967,48 @@ function Cs.element:getRoot()
 		el = el._parent
 	until (not el)
 	return nil -- we've probably been removed
+end
+
+
+
+-- sound = getSound( soundKey )
+function Cs.element:getSound(soundK)
+	assertArgType('soundKey', 1, soundK, 'string')
+	checkValidSoundKey(soundK)
+	return self._sounds[soundK]
+end
+
+-- sound = getResultingSound( soundKey )
+function Cs.element:getResultingSound(soundK)
+	assertArgType('soundKey', 1, soundK, 'string')
+	checkValidSoundKey(soundK)
+	local sound = self._sounds[soundK]
+	if (sound == nil) then
+		for _, parent in self:parents() do
+			sound = parent._sounds[soundK]
+			if (sound ~= nil) then
+				break
+			end
+		end
+		if (sound == nil) then
+			local gui = self._gui
+			if (gui) then
+				sound = gui._defaultSounds[soundK]
+			end
+		end
+	end
+	if (sound == '') then
+		sound = nil -- special case: An empty string intercepts the bubbling and tells that no sound should be played
+	end
+	return sound
+end
+
+-- setSound( soundKey, sound )
+-- setSound( soundKey, nil ) -- remove sound
+function Cs.element:setSound(soundK, sound)
+	assertArgType('soundKey', 1, soundK, 'string')
+	checkValidSoundKey(soundK)
+	self._sounds[soundK] = sound
 end
 
 
@@ -2422,6 +2580,7 @@ function Cs.container:setScroll(scrollX, scrollY)
 	end
 
 	if (self:isDisplayed()) then
+		playSound(self, 'scroll') -- (may have to add more limitations to whether "scroll" sound plays or not)
 		updateHoveredElement(self._gui)
 	end
 end
@@ -2432,7 +2591,7 @@ function Cs.container:scroll(dx, dy)
 end
 
 -- updateScroll( )
--- TODO: Update scrolls automatically when elements change size etc.
+-- TODO: Update scroll automatically when elements change size etc.
 function Cs.container:updateScroll()
 	self:scroll(0, 0)
 end
@@ -3485,6 +3644,7 @@ Cs.button = Cs.widget:extend('GuiButton', {
 
 	_arrow = nil,
 	_canToggle = false,
+	_close = false,
 	_imageBackgroundColor = nil,
 	_imagePadding = 0,
 	_sprite = nil,
@@ -3509,6 +3669,7 @@ function Cs.button:init(gui, data, parent)
 
 	retrieve(self, data, '_arrow')
 	retrieve(self, data, '_canToggle')
+	retrieve(self, data, '_close')
 	retrieve(self, data, '_imageBackgroundColor')
 	retrieve(self, data, '_imagePadding')
 	-- retrieve(self, data, '_sprite')
@@ -3870,6 +4031,9 @@ function Cs.button:press(ignoreActiveState)
 	if not (ignoreActiveState or self._active) then
 		return false
 	end
+
+	-- Press/toggle the button
+	local preparedSound = prepareSound(self, 'press')
 	if (self._canToggle) then
 		self._toggled = (not self._toggled)
 	end
@@ -3879,6 +4043,25 @@ function Cs.button:press(ignoreActiveState)
 		self:trigger('toggle')
 	end
 	self:triggerBubbling('pressed', self)
+
+	-- Close closest closable
+	local closedAnything = false
+	if (self._close) then
+		if (self:canClose()) then
+			closedAnything = self:close()
+		else
+			for _, parent in self:parents() do
+				if (parent:canClose()) then
+					closedAnything = parent:close()
+					break
+				end
+			end
+		end
+	end
+	if (not closedAnything) then
+		preparedSound() -- 'close' has it's own sound
+	end
+
 	return true
 end
 
@@ -4054,6 +4237,8 @@ function Cs.input:focus()
 
 	self._field:resetBlinking()
 
+	playSound(self, 'focus')
+
 	self:triggerBubbling('focused', self)
 end
 
@@ -4112,10 +4297,12 @@ function Cs.input:_keyDown(key, scancode, isRepeat)
 		if (not isRepeat) then
 			self._field:setText(self._savedValue)
 			self:blur()
+			playSound(self, 'inputrevert')
 		end
 	elseif (key == 'return' or key == 'kpenter') then
 		if (not isRepeat) then
 			self:blur()
+			playSound(self, 'inputsubmit')
 			self:trigger('submit')
 		end
 	else

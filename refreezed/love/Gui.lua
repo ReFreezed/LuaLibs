@@ -110,6 +110,7 @@
 	container
 	- find, findAll, findActive, findToggled
 	- get, children
+	- getChildWithData
 	- getElementAt
 	- getMaxWidth, setMaxWidth, getMaxHeight, setMaxHeight
 	- getPadding, setPadding
@@ -2678,6 +2679,18 @@ end
 -- for index, child in children( )
 function Cs.container:children()
 	return ipairs(self)
+end
+
+
+
+-- child = getChildWithData( dataKey, dataValue )
+function Cs.container:getChildWithData(k, v)
+	for _, child in ipairs(self) do
+		if (child._data[k] == v) then
+			return child
+		end
+	end
+	return nil
 end
 
 

@@ -59,11 +59,12 @@ local json = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', 
 
 local network = {
 
+	DEFAULT_SERVER_IP = '127.0.0.1',
 	MIN_PORT = 1024, MAX_PORT = 65535,
 
 	-- Settings
 	_maxPeers = 64,
-	_serverIp = 'localhost', _port = 0,
+	_serverIp = '127.0.0.1', _port = 0,
 
 	_connectedClients = {},
 	_host = nil,

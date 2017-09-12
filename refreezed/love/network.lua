@@ -41,7 +41,7 @@
 	getClientPing
 
 	startClient, stopClient, isClient
-	connectToServer, disconnectFromServer, hasServer, isConnectedToServer
+	connectToServer, disconnectFromServer, hasServer, isConnectedToServer, isConnectingToServer
 	sendToServer
 	getServerPing
 
@@ -79,6 +79,7 @@ local network = {
 	onReceiveMessageFromServer = nil, -- function( data )
 	onServerConnect = nil, -- function( )
 	onServerDisconnect = nil, -- function( )
+	onAbortServerConnect = nil, -- function( )
 
 }
 
@@ -302,6 +303,7 @@ function network.update()
 			end
 
 		end
+		-- void
 	end
 end
 
@@ -549,14 +551,13 @@ function network.disconnectFromServer(code)
 		return false, 'not connected to any server'
 	end
 	printf('Disconnecting from server...')
+	local wasConnectedToServer = network._isConnectedToServer
 	network._serverPeer:disconnect_now(code or 0) -- TODO: Figure out how to use disconnect+flush instead of disconnect_now
 	-- network._host:flush()
-	if (network._isConnectedToServer) then
-		trigger('onServerDisconnect')
-	end
 	network._isConnectedToServer = false
 	network._isTryingToConnectToServer = false
 	network._serverPeer = nil
+	trigger(wasConnectedToServer and 'onServerDisconnect' or 'onAbortServerConnect')
 	printf('Disconnected from server')
 	return true
 end
@@ -569,6 +570,11 @@ end
 -- state = isConnectedToServer( )
 function network.isConnectedToServer()
 	return network._isConnectedToServer
+end
+
+-- state = isConnectingToServer( )
+function network.isConnectingToServer()
+	return (network.hasServer() and not network.isConnectedToServer())
 end
 
 

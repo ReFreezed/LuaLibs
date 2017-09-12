@@ -50,7 +50,7 @@
 	getElementAt
 	getFont, setFont, getBoldFont, setBoldFont, getSmallFont, setSmallFont
 	getHoveredElement
-	getNavigationTarget, navigateTo, navigateToFirst, navigate
+	getNavigationTarget, navigateTo, navigateToFirst, navigate, canNavigateTo
 	getRoot
 	getScissorCoordsConverter, setScissorCoordsConverter
 	getSoundPlayer, setSoundPlayer
@@ -531,7 +531,7 @@ end
 -- validateNavigationTarget( gui )
 function validateNavigationTarget(gui)
 	local nav = gui._navigationTarget
-	if (nav) and not (nav:isActive() and nav:isDisplayed()) then
+	if (nav and not gui:canNavigateTo(nav)) then
 		gui:navigateTo(nil)
 	end
 end
@@ -929,10 +929,7 @@ do
 		if (self._navigationTarget == widget) then
 			return true
 		end
-		if (self._lockNavigation) then
-			return false
-		end
-		if (widget) and not (widget:is(Cs.widget) and widget:isActive() and widget:isDisplayed()) then
+		if (self._lockNavigation or not self:canNavigateTo(widget)) then
 			return false
 		end
 		setNavigationTarget(self, widget)
@@ -953,7 +950,7 @@ do
 			if (el:is(Cs.widget) and el:isActive() and not (first and first._priority > el._priority)) then
 				first = el
 			end
-			if (el._captureInput) then
+			if (el._captureInput or el._captureGuiInput) then
 				break
 			end
 		end
@@ -962,6 +959,7 @@ do
 	end
 
 	-- element = navigate( angle )
+	local MAX_ANGLE_DIFF = tau/4
 	function Gui:navigate(targetAng)
 		if (self._lockNavigation) then
 			return nil
@@ -991,18 +989,40 @@ do
 				local dx, dy = x-navX, y-navY
 				local distSquared = dx*dx+dy*dy
 				local angDiff = math.atan2(dy, dx)-targetAng
-				angDiff = math.abs(math.atan2(math.sin(angDiff), math.cos(angDiff)))
-				if (angDiff < tau/4 and distSquared <= closestDistSquared) then
+				angDiff = math.abs(math.atan2(math.sin(angDiff), math.cos(angDiff))) -- (normalize)
+				if (angDiff < MAX_ANGLE_DIFF and distSquared <= closestDistSquared) then
 					closestEl, closestDistSquared, closestAngDiff = el, distSquared, angDiff
 				end
 			end
-			if (el._captureInput) then
+			if (el._captureInput or el._captureGuiInput) then
 				break
 			end
 		end
 		setNavigationTarget(self, closestEl)
 
 		return closestEl
+	end
+
+	-- state = canNavigateTo( element )
+	-- Note: Does not check if navigation is locked
+	function Gui:canNavigateTo(widget)
+		if (widget == nil) then
+			return true -- navigation target can always be nothing
+		elseif not (widget:is(Cs.widget) and widget:isActive() and widget:isDisplayed()) then
+			return false
+		end
+		local root = self._root
+		if (not root or root._hidden) then
+			return false
+		end
+		for el in root:traverseVisible() do
+			if (el == widget) then
+				return true
+			elseif (el._captureInput or el._captureGuiInput) then
+				return false
+			end
+		end
+		error('somehow the element is a displayed active widget but not among the visible elements under the root')
 	end
 
 end
@@ -1143,6 +1163,8 @@ function Gui:keyDown(key, scancode, isRepeat)
 				return true
 			elseif (el._captureInput) then
 				return true
+			elseif (el._captureGuiInput) then
+				break
 			end
 		end
 	end
@@ -1203,7 +1225,7 @@ function Gui:mouseDown(x, y, buttonN)
 			return true -- (suppress default behavior)
 		end
 		local handled, grabFocus = el:_mouseDown(x, y, buttonN)
-		handled = (handled or el._captureInput or el:isSolid())
+		handled = (handled or el._captureInput or el._captureGuiInput or el:isSolid())
 		if (handled) then
 			if (grabFocus and not next(self._mouseFocusSet)) then
 				setMouseFocus(self, el, buttonN)
@@ -1314,7 +1336,7 @@ function Gui:back()
 		if (el:canClose()) then
 			el:close()
 			return true
-		elseif (el._captureInput) then
+		elseif (el._captureInput or el._captureGuiInput) then
 			break
 		end
 	end
@@ -1358,7 +1380,7 @@ Cs.element = newClass('GuiElement', {
 
 	_anchorX = 0.0, _anchorY = 0.0, -- where in self to base off x and y
 	_background = nil,
-	_captureInput = false, -- (all input)
+	_captureInput = false, --[[all input]] _captureGuiInput = false, --[[all input affecting GUI]]
 	_closable = false,
 	_data = nil,
 	_floating = false, -- disables natural positioning in certain parents (e.g. bars)
@@ -1390,7 +1412,7 @@ function Cs.element:init(gui, data, parent)
 
 	retrieve(self, data, '_anchorX', '_anchorY')
 	retrieve(self, data, '_background')
-	retrieve(self, data, '_captureInput')
+	retrieve(self, data, '_captureInput', '_captureGuiInput')
 	retrieve(self, data, '_closable')
 	-- retrieve(self, data, '_data')
 	retrieve(self, data, '_floating')
@@ -2705,7 +2727,7 @@ function Cs.container:getElementAt(x, y, nonSolid)
 		return nil
 	end
 	for el in self:traverseVisible(x, y) do
-		if ((nonSolid or el:isSolid()) and el:isAt(x, y)) or (el._captureInput) then
+		if ((nonSolid or el:isSolid()) and el:isAt(x, y)) or (el._captureInput or el._captureGuiInput) then
 			return el
 		end
 	end
@@ -2721,6 +2743,7 @@ function Cs.container:insert(childData, i)
 	local child = C(self._gui, childData, self)
 	table.insert(self, (i or #self+1), child)
 
+	validateNavigationTarget(self._gui)
 	scheduleLayoutUpdateIfDisplayed(self)
 
 	return child

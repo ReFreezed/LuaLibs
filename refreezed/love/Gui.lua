@@ -50,7 +50,7 @@
 	getElementAt
 	getFont, setFont, getBoldFont, setBoldFont, getSmallFont, setSmallFont
 	getHoveredElement
-	getNavigationTarget, navigateTo, navigateToFirst, navigate, canNavigateTo
+	getNavigationTarget, navigateTo, navigateToNext, navigateToPrevious, navigateToFirst, navigate, canNavigateTo
 	getRoot
 	getScissorCoordsConverter, setScissorCoordsConverter
 	getSoundPlayer, setSoundPlayer
@@ -76,7 +76,7 @@
 	- getData, setData, swapData
 	- getDimensions, setDimensions, getWidth, setWidth, getHeight, setHeight
 	- getGui
-	- getId
+	- getId, hasId
 	- getIndex, getDepth
 	- getLayout
 	- getLayoutDimensions, getLayoutWidth, getLayoutHeight
@@ -936,6 +936,58 @@ do
 		return true
 	end
 
+	do
+		local function navigateToNextOrPrevious(self, id, allowNone, usePrev)
+			local root = self._root
+			if (not root or root._hidden) then
+				return false
+			end
+			local nav = self._navigationTarget
+			if (not nav and not usePrev) then
+				return self:navigateToFirst()
+			end
+			local foundNav, lastWidget = false, nil
+			for el in root:traverseVisible() do -- remember that we're traversing backwards
+				local elIsValid = (el:is(Cs.widget) and el:isActive() and (not id or el._id == id))
+				if (elIsValid and usePrev and foundNav) then
+					setNavigationTarget(self, el)
+					return el
+				end
+				foundNav = (foundNav or el == nav)
+				if (not usePrev and foundNav) then
+					if (lastWidget or allowNone) then
+						setNavigationTarget(self, lastWidget)
+						return lastWidget
+					end
+					return nav
+				end
+				if (elIsValid) then
+					lastWidget = el
+				end
+				if (el._captureInput or el._captureGuiInput) then
+					break
+				end
+			end
+			if (not allowNone) then
+				return nav
+			end
+			setNavigationTarget(self, nil)
+			return nil
+		end
+
+		-- element = navigateToNext( [ id=any, allowNone=false ] )
+		-- Note: Same at navigateToFirst if there's currently no target
+		function Gui:navigateToNext(id, allowNone)
+			return navigateToNextOrPrevious(self, id, allowNone, false)
+		end
+
+		-- element = navigateToPrevious( [ id=any, allowNone=false ] )
+		function Gui:navigateToPrevious(id, allowNone)
+			return navigateToNextOrPrevious(self, id, allowNone, true)
+		end
+
+	end
+
 	-- element = navigateToFirst( )
 	function Gui:navigateToFirst()
 		if (self._lockNavigation) then
@@ -1727,6 +1779,16 @@ Cs.element:defineGet('_gui')
 
 -- getId
 Cs.element:defineGet('_id')
+
+-- state = hasId( id [, id2... ] )
+function Cs.element:hasId(id, ...)
+	if (self._id == id) then
+		return true
+	elseif (...) then
+		return self:hasId(...)
+	end
+	return false
+end
 
 
 

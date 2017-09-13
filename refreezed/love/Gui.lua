@@ -948,7 +948,7 @@ do
 			end
 			local foundNav, lastWidget = false, nil
 			for el in root:traverseVisible() do -- remember that we're traversing backwards
-				local elIsValid = (el:is(Cs.widget) and el:isActive() and (not id or el._id == id))
+				local elIsValid = (el:is(Cs.widget) and (not id or el._id == id))
 				if (elIsValid and usePrev and foundNav) then
 					setNavigationTarget(self, el)
 					return el
@@ -999,7 +999,7 @@ do
 		end
 		local first = nil
 		for el in root:traverseVisible() do
-			if (el:is(Cs.widget) and el:isActive() and not (first and first._priority > el._priority)) then
+			if (el:is(Cs.widget) and not (first and first._priority > el._priority)) then
 				first = el
 			end
 			if (el._captureInput or el._captureGuiInput) then
@@ -1034,7 +1034,7 @@ do
 		-- Navigate to closest target in targetAng's general direction
 		local closestEl, closestDistSquared, closestAngDiff = nav, math.huge, math.huge
 		for el in root:traverseVisible() do
-			if (el ~= nav and el:is(Cs.widget) and el:isActive()) then
+			if (el ~= nav and el:is(Cs.widget)) then
 				local x, y = el._layoutX+el._layoutOffsetX, el._layoutY+el._layoutOffsetY
 				x = math.min(math.max(navX, x+0.01), x+el._layoutWidth-0.01)
 				y = math.min(math.max(navY, y+0.01), y+el._layoutHeight-0.01)
@@ -1060,7 +1060,7 @@ do
 	function Gui:canNavigateTo(widget)
 		if (widget == nil) then
 			return true -- navigation target can always be nothing
-		elseif not (widget:is(Cs.widget) and widget:isActive() and widget:isDisplayed()) then
+		elseif not (widget:is(Cs.widget) and widget:isDisplayed()) then
 			return false
 		end
 		local root = self._root
@@ -1370,7 +1370,7 @@ end
 -- handled = ok( )
 function Gui:ok()
 	local nav = self._navigationTarget
-	if (nav) then
+	if (nav and nav._active) then
 		return nav:_ok()
 	end
 	return false
@@ -3715,9 +3715,6 @@ function Cs.widget:setActive(state)
 		return false
 	end
 	self._active = state
-	if (state == false) then
-		validateNavigationTarget(self._gui)
-	end
 	return true
 end
 
@@ -4469,10 +4466,10 @@ end
 -- OVERRIDE
 -- setActive( state )
 function Cs.input:setActive(state)
-	Cs.input.super.setActive(self, state)
 	if (state == false) then
 		self:blur()
 	end
+	Cs.input.super.setActive(self, state)
 end
 
 

@@ -166,7 +166,7 @@ end
 -- shortMessage = getDataStringSummary( dataStr )
 function getDataStringSummary(dataStr)
 	dataStr = dataStr:gsub('\r?\n', ' ')
-	return (#dataStr > 100-3 and dataStr:sub(1, 100-3)..'...' or dataStr)
+	return (#dataStr > 100 and dataStr:sub(1, 70)..'...'..dataStr:sub(#dataStr-30) or dataStr)
 end
 
 
@@ -185,8 +185,9 @@ end
 
 -- printf( formatString, ... )
 function printf(s, ...)
-	local hostType = (network._isServer and '.server') or (network._isClient and '.client') or ''
-	print('[network'..hostType..'] '..s:format(...))
+	local hostType = (network._isServer and 'server') or (network._isClient and 'client') or 'network'
+	local timeStr = os.date('%H:%M:%S')
+	print(('[%s@%s] %s'):format(hostType, timeStr, s:format(...)))
 end
 network._printf = printf -- expose to network module extensions
 

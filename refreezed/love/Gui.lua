@@ -105,7 +105,9 @@
 	- Event: close
 	- Event: keydown
 	- Event: mousedown
+	- Event: refresh
 	- Event: show, hide
+	- Event: update
 
 	container
 	- find, findAll, findActive, findToggled
@@ -142,6 +144,7 @@
 
 		canvas
 		- getCanvasBackgroundColor, setCanvasBackgroundColor
+		- Event: draw
 
 		image
 		- getImageBackgroundColor, setImageBackgroundColor

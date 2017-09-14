@@ -140,6 +140,9 @@
 	- isBold, setBold
 	- isSmall, setSmall
 
+		canvas
+		- getCanvasBackgroundColor, setCanvasBackgroundColor
+
 		image
 		- getImageBackgroundColor, setImageBackgroundColor
 		- getSprite, setSprite
@@ -709,9 +712,9 @@ function Gui:update(dt)
 	if (root) then
 		root:_update(dt)
 		if (root:isVisible()) then
-			root:trigger('update')
+			root:trigger('update', dt)
 			for el in root:traverseVisible() do
-				el:trigger('update')
+				el:trigger('update', dt)
 			end
 		end
 	end
@@ -3450,6 +3453,88 @@ end
 -- state = isSolid( )
 function Cs.leaf:isSolid()
 	return true
+end
+
+
+
+--==============================================================
+--= Canvas =====================================================
+--==============================================================
+
+
+
+Cs.canvas = Cs.leaf:extend('GuiCanvas', {
+
+	--[[OVERRIDE]] PADDING = 0,
+
+	_canvasBackgroundColor = nil,
+
+})
+
+function Cs.canvas:init(gui, data, parent)
+	Cs.canvas.super.init(self, gui, data, parent)
+
+	retrieve(self, data, '_canvasBackgroundColor')
+
+end
+
+
+
+-- REPLACE
+-- _draw( )
+function Cs.canvas:_draw()
+	if (self._hidden) then
+		return
+	end
+
+	local gui = self._gui
+	if (gui.debug) then
+		self:_drawDebug(255, 0, 0)
+		return
+	end
+
+	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
+	local w, h = self._layoutWidth, self._layoutHeight
+
+	self:trigger('beforedraw', x, y, w, h)
+
+	-- Layout background
+	drawBackground(self)
+
+	-- Canvas
+	local cw, ch = (self._width or w), (self._height or h)
+	if (cw > 0 and ch > 0) then
+		local cx, cy = x+math.floor((w-cw)/2), y+math.floor((h-ch)/2)
+		local bgColor = self._canvasBackgroundColor
+		if (bgColor) then
+			LG.setColor(bgColor)
+			LG.rectangle('fill', cx, cy, cw, ch)
+		end
+		gui:_setScissor(cx, cy, cw, ch)
+		LG.translate(cx, cy)
+		LG.setColor(255, 255, 255)
+		self:trigger('draw', cw, ch)
+		gui:_setScissor(nil)
+	end
+
+	self:trigger('afterdraw', x, y, w, h)
+
+end
+
+
+
+-- getCanvasBackgroundColor, setCanvasBackgroundColor
+Cs.canvas:define('_canvasBackgroundColor')
+
+
+
+-- REPLACE
+-- _updateLayoutSize( )
+function Cs.canvas:_updateLayoutSize()
+	self._layoutWidth = (self._width or 0)
+	self._layoutHeight = (self._height or 0)
+	self._layoutInnerWidth = self._layoutWidth
+	self._layoutInnerHeight = self._layoutHeight
 end
 
 

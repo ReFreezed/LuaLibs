@@ -120,6 +120,7 @@
 	- getVisibleChild, getVisibleChildIndex, getVisibleChildCount
 	- indexOf
 	- insert, remove, empty
+	- setChildrenActive
 	- setChildrenHidden, getVisibleChild, setVisibleChild
 	- setToggledChild
 	- sort
@@ -2856,6 +2857,17 @@ end
 
 
 
+-- setChildrenActive( state )
+function Cs.container:setChildrenActive(state)
+	for _, child in ipairs(self) do
+		if (child:is(Cs.widget)) then
+			child:setActive(state)
+		end
+	end
+end
+
+
+
 -- setChildrenHidden( state )
 function Cs.container:setChildrenHidden(state)
 	for _, child in ipairs(self) do
@@ -2884,24 +2896,36 @@ function Cs.container:setVisibleChild(id)
 			child:hide()
 		end
 	end
-	return visibleChild
+	return visibleChild -- if multiple children matched then the last match is returned
 end
 
 
 
--- setToggledChild( id [, includeGrandchildren=false ] )
+-- widget = setToggledChild( id [, includeGrandchildren=false ] )
 function Cs.container:setToggledChild(id, deep)
+	local toggledChild = nil
 	if (deep) then
 		for button in self:traverseType('button') do
-			button:setToggled(button._id == id)
+			if (button._id == id) then
+				button:setToggled(true)
+				toggledChild = button
+			else
+				button:setToggled(false)
+			end
 		end
 	else
 		for _, child in ipairs(self) do
 			if (child:is(Cs.button)) then
-				child:setToggled(child._id == id)
+				if (child._id == id) then
+					child:setToggled(true)
+					toggledChild = child
+				else
+					child:setToggled(false)
+				end
 			end
 		end
 	end
+	return toggledChild -- if multiple children matched then the last match is returned
 end
 
 

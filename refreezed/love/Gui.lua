@@ -117,11 +117,11 @@
 	- getMaxWidth, setMaxWidth, getMaxHeight, setMaxHeight
 	- getPadding, setPadding
 	- getScroll, setScroll, scroll, updateScroll
-	- getVisibleChild, getVisibleChildIndex, getVisibleChildCount
+	- getVisibleChild, getVisibleChildNumber, getVisibleChildCount, setVisibleChild
 	- indexOf
 	- insert, remove, empty
 	- setChildrenActive
-	- setChildrenHidden, getVisibleChild, setVisibleChild
+	- setChildrenHidden
 	- setToggledChild
 	- sort
 	- traverse, traverseType, traverseVisible
@@ -2490,8 +2490,7 @@ end
 
 
 
--- OVERRIDE
--- _update( deltaTime )
+-- OVERRIDE _update( deltaTime )
 function Cs.container:_update(dt)
 	Cs.container.super._update(self, dt)
 	for _, child in ipairs(self) do
@@ -2501,8 +2500,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.container:_draw()
 	if (self._hidden) then
 		return
@@ -2690,12 +2688,13 @@ end
 
 
 
--- child = getVisibleChild( index )
-function Cs.container:getVisibleChild(i)
+-- child = getVisibleChild( [ number=1 ] )
+function Cs.container:getVisibleChild(n)
+	n = (n or 1)
 	for _, child in ipairs(self) do
 		if (not child._hidden) then
-			i = i-1
-			if (i == 0) then
+			n = n-1
+			if (n == 0) then
 				return child
 			end
 		end
@@ -2703,14 +2702,14 @@ function Cs.container:getVisibleChild(i)
 	return nil
 end
 
--- index = getVisibleChildIndex( child )
-function Cs.container:getVisibleChildIndex(el)
-	local i = 0
+-- number = getVisibleChildNumber( child )
+function Cs.container:getVisibleChildNumber(el)
+	local n = 0
 	for _, child in ipairs(self) do
 		if (not child._hidden) then
-			i = i+1
+			n = n+1
 			if (child == el) then
-				return i
+				return n
 			end
 		end
 	end
@@ -2728,6 +2727,20 @@ function Cs.container:getVisibleChildCount()
 	return count
 end
 
+-- visibleChild = setVisibleChild( id )
+function Cs.container:setVisibleChild(id)
+	local visibleChild = nil
+	for _, child in ipairs(self) do
+		if (child._id == id) then
+			child:show()
+			visibleChild = child
+		else
+			child:hide()
+		end
+	end
+	return visibleChild -- if multiple children matched then the last match is returned
+end
+
 
 
 -- index = indexOf( element )
@@ -2742,8 +2755,7 @@ end
 
 
 
--- REPLACE
--- state = isSolid( )
+-- REPLACE state = isSolid( )
 function Cs.container:isSolid()
 	return (self._solid or self._background ~= nil or self._maxWidth ~= nil or self._maxHeight ~= nil)
 end
@@ -2818,8 +2830,7 @@ function Cs.container:insert(childData, i)
 	return child
 end
 
--- REPLACE
--- remove( [ index ] )
+-- REPLACE remove( [ index ] )
 function Cs.container:remove(i)
 	if (not i) then
 		return Cs.container.super.remove(self) -- remove self instead of child
@@ -2845,8 +2856,7 @@ end
 
 
 
--- REPLACE
--- handled = _mouseWheel( deltaX, deltaY )
+-- REPLACE handled = _mouseWheel( deltaX, deltaY )
 function Cs.container:_mouseWheel(dx, dy)
 	if (dx ~= 0 and self._maxWidth) or (dy ~= 0 and self._maxHeight) then
 		self:scroll(self.SCROLL_SPEED_X*dx, self.SCROLL_SPEED_Y*dy)
@@ -2873,30 +2883,6 @@ function Cs.container:setChildrenHidden(state)
 	for _, child in ipairs(self) do
 		child:setHidden(state)
 	end
-end
-
--- child = getVisibleChild( )
-function Cs.container:getVisibleChild()
-	for _, child in ipairs(self) do
-		if (not child._hidden) then
-			return child
-		end
-	end
-	return nil
-end
-
--- visibleChild = setVisibleChild( id )
-function Cs.container:setVisibleChild(id)
-	local visibleChild = nil
-	for _, child in ipairs(self) do
-		if (child._id == id) then
-			child:show()
-			visibleChild = child
-		else
-			child:hide()
-		end
-	end
-	return visibleChild -- if multiple children matched then the last match is returned
 end
 
 
@@ -3017,8 +3003,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.container:_updateLayoutSize()
 	self._layoutWidth = math.min((self._width or self._expandX and self._parent._layoutInnerWidth or 2*self._padding),
 		(self._maxWidth or math.huge))
@@ -3029,8 +3014,7 @@ function Cs.container:_updateLayoutSize()
 	updateContainerChildLayoutSizes(self)
 end
 
--- REPLACE
--- _expandLayout( [ expandWidth, expandHeight ] )
+-- REPLACE _expandLayout( [ expandWidth, expandHeight ] )
 function Cs.container:_expandLayout(expandW, expandH)
 	if (expandW) then
 		self._layoutWidth = math.min(expandW, (self._maxWidth or math.huge))
@@ -3046,8 +3030,7 @@ function Cs.container:_expandLayout(expandW, expandH)
 	end
 end
 
--- REPLACE
--- _updateLayoutPosition( )
+-- REPLACE _updateLayoutPosition( )
 function Cs.container:_updateLayoutPosition()
 	for _, child in ipairs(self) do
 		if (not child._hidden) then
@@ -3094,8 +3077,7 @@ Cs.hbar = Cs.bar:extend('GuiHorizontalBar', {
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.hbar:_updateLayoutSize()
 	updateContainerChildLayoutSizes(self)
 	local staticW, dynamicW, highestW, highestDynamicW, expandablesX, currentMx, sumMx,
@@ -3110,8 +3092,7 @@ function Cs.hbar:_updateLayoutSize()
 	updateContainerLayoutSize(self)
 end
 
--- REPLACE
--- _expandLayout( [ expandWidth, expandHeight ] )
+-- REPLACE _expandLayout( [ expandWidth, expandHeight ] )
 function Cs.hbar:_expandLayout(expandW, expandH)
 
 	-- Expand self
@@ -3152,8 +3133,7 @@ function Cs.hbar:_expandLayout(expandW, expandH)
 
 end
 
--- REPLACE
--- _updateLayoutPosition( )
+-- REPLACE _updateLayoutPosition( )
 function Cs.hbar:_updateLayoutPosition()
 	local x, y, m, first = self._layoutX+self._padding, self._layoutY+self._padding, 0, true
 	for _, child in ipairs(self) do
@@ -3190,8 +3170,7 @@ Cs.vbar = Cs.bar:extend('GuiVerticalBar', {
 -- 	Cs.vbar.super.init(self, gui, data, parent)
 -- end
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.vbar:_updateLayoutSize()
 	updateContainerChildLayoutSizes(self)
 	local staticW, dynamicW, highestW, highestDynamicW, expandablesX, currentMx, sumMx,
@@ -3206,8 +3185,7 @@ function Cs.vbar:_updateLayoutSize()
 	updateContainerLayoutSize(self)
 end
 
--- REPLACE
--- _expandLayout( [ expandWidth, expandHeight ] )
+-- REPLACE _expandLayout( [ expandWidth, expandHeight ] )
 function Cs.vbar:_expandLayout(expandW, expandH)
 
 	-- Expand self
@@ -3248,8 +3226,7 @@ function Cs.vbar:_expandLayout(expandW, expandH)
 
 end
 
--- REPLACE
--- _updateLayoutPosition( )
+-- REPLACE _updateLayoutPosition( )
 function Cs.vbar:_updateLayoutPosition()
 	local x, y, m, first = self._layoutX+self._padding, self._layoutY+self._padding, 0, true
 	for _, child in ipairs(self) do
@@ -3289,8 +3266,7 @@ Cs.root = Cs.container:extend('GuiRoot', {
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.root:_draw()
 	if (self._hidden) then
 		return
@@ -3316,8 +3292,7 @@ end
 
 
 
--- REPLACE
--- setDimensions( width, height )
+-- REPLACE setDimensions( width, height )
 function Cs.root:setDimensions(w, h)
 	assert(w)
 	assert(h)
@@ -3330,8 +3305,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.root:_updateLayoutSize()
 	self._layoutWidth = self._width
 	self._layoutHeight = self._height
@@ -3340,8 +3314,7 @@ function Cs.root:_updateLayoutSize()
 	updateContainerChildLayoutSizes(self)
 end
 
--- REPLACE
--- _expandLayout( [ expandWidth, expandHeight ] )
+-- REPLACE _expandLayout( [ expandWidth, expandHeight ] )
 -- expandWidth, expandHeight: Ignored
 function Cs.root:_expandLayout(expandW, expandH)
 	for _, child in ipairs(self) do
@@ -3476,8 +3449,7 @@ end
 
 
 
--- REPLACE
--- state = isSolid( )
+-- REPLACE state = isSolid( )
 function Cs.leaf:isSolid()
 	return true
 end
@@ -3507,8 +3479,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.canvas:_draw()
 	if (self._hidden) then
 		return
@@ -3555,8 +3526,7 @@ Cs.canvas:define('_canvasBackgroundColor')
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.canvas:_updateLayoutSize()
 	self._layoutWidth = (self._width or 0)
 	self._layoutHeight = (self._height or 0)
@@ -3597,8 +3567,7 @@ end
 
 
 
--- OVERRIDE
--- _update( deltaTime )
+-- OVERRIDE _update( deltaTime )
 function Cs.image:_update(dt)
 	Cs.image.super._update(self, dt)
 	local sprite = self._sprite
@@ -3609,8 +3578,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.image:_draw()
 	if (self._hidden) then
 		return
@@ -3693,8 +3661,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.image:_updateLayoutSize()
 	if (self._sprite) then
 		local iw, ih = self._sprite:getScaledDimensions()
@@ -3731,8 +3698,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.text:_draw()
 	if (self._hidden) then
 		return
@@ -3780,8 +3746,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.text:_updateLayoutSize()
 	local font = self:getFont()
 	self._textWidth, self._textHeight = getTextDimensions(font, self._text, self._textWrapLimit)
@@ -3841,7 +3806,7 @@ end
 Cs.button = Cs.widget:extend('GuiButton', {
 
 	--[[OVERRIDE]] PADDING = 3,
-	ARROW = nil, -- (set here below)
+	ARROW = nil, -- (is set here below)
 	ARROW_LENGTH = 2,
 	IMAGE_SPACING = 3, TEXT_SPACING = 6,
 	THEMES = {['normal']=true, ['highlight']=true, ['negative']=true, ['blend']=true},
@@ -3895,8 +3860,7 @@ end
 
 
 
--- OVERRIDE
--- _update( deltaTime )
+-- OVERRIDE _update( deltaTime )
 function Cs.button:_update(dt)
 	Cs.button.super._update(self, dt)
 	local sprite = self._sprite
@@ -3907,8 +3871,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.button:_draw()
 	if (self._hidden) then
 		return
@@ -4125,8 +4088,7 @@ end
 -- getText2
 Cs.button:defineGet('_text2')
 
--- OVERRIDE
--- setText( text )
+-- OVERRIDE setText( text )
 function Cs.button:setText(text)
 	if (self._text == text) then
 		return
@@ -4193,8 +4155,7 @@ end
 
 
 
--- REPLACE
--- handled, grabFocus = _mouseDown( x, y, button )
+-- REPLACE handled, grabFocus = _mouseDown( x, y, button )
 function Cs.button:_mouseDown(x, y, buttonN)
 	if (buttonN == 1) then
 		if (not self._active) then
@@ -4206,13 +4167,11 @@ function Cs.button:_mouseDown(x, y, buttonN)
 	return false, false
 end
 
--- -- REPLACE
--- -- _mouseMove( x, y )
+-- -- REPLACE _mouseMove( x, y )
 -- function Cs.button:_mouseMove(x, y)
 -- end
 
--- REPLACE
--- _mouseUp( x, y, button )
+-- REPLACE _mouseUp( x, y, button )
 function Cs.button:_mouseUp(x, y, buttonN)
 	if (buttonN == 1) then
 		self._isPressed = false
@@ -4224,8 +4183,7 @@ end
 
 
 
--- REPLACE
--- handled = _ok( )
+-- REPLACE handled = _ok( )
 function Cs.button:_ok()
 	self:press(true)
 	return true
@@ -4274,8 +4232,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.button:_updateLayoutSize()
 
 	local font = self:getFont()
@@ -4350,8 +4307,7 @@ end
 
 
 
--- OVERRIDE
--- _update( deltaTime )
+-- OVERRIDE _update( deltaTime )
 function Cs.input:_update(dt)
 	Cs.input.super._update(self, dt)
 	self._field:update(dt)
@@ -4359,8 +4315,7 @@ end
 
 
 
--- REPLACE
--- _draw( )
+-- REPLACE _draw( )
 function Cs.input:_draw()
 	if (self._hidden) then
 		return
@@ -4497,8 +4452,7 @@ end
 
 
 
--- REPLACE
--- handled, grabFocus = _keyDown( key, scancode, isRepeat )
+-- REPLACE handled, grabFocus = _keyDown( key, scancode, isRepeat )
 function Cs.input:_keyDown(key, scancode, isRepeat)
 	if (key == 'escape') then
 		if (not isRepeat) then
@@ -4518,21 +4472,18 @@ function Cs.input:_keyDown(key, scancode, isRepeat)
 	return true, false
 end
 
--- -- REPLACE
--- -- _keyUp( key, scancode )
+-- -- REPLACE _keyUp( key, scancode )
 -- function Cs.input:_keyUp(key, scancode)
 -- end
 
--- REPLACE
--- _textInput( text )
+-- REPLACE _textInput( text )
 function Cs.input:_textInput(text)
 	self._field:textInput(text)
 end
 
 
 
--- REPLACE
--- handled, grabFocus = _mouseDown( x, y, button )
+-- REPLACE handled, grabFocus = _mouseDown( x, y, button )
 function Cs.input:_mouseDown(x, y, buttonN)
 	if (not self._active) then
 		return true, false
@@ -4547,22 +4498,19 @@ function Cs.input:_mouseDown(x, y, buttonN)
 	return true, false -- NOTE: We've set the focus ourselves
 end
 
--- REPLACE
--- _mouseMove( x, y )
+-- REPLACE _mouseMove( x, y )
 function Cs.input:_mouseMove(x, y)
 	self._field:mouseMove(x-self._layoutX-self.PADDING, 0)
 end
 
--- REPLACE
--- _mouseUp( x, y, button )
+-- REPLACE _mouseUp( x, y, button )
 function Cs.input:_mouseUp(x, y, buttonN)
 	self._field:mouseUp(x-self._layoutX-self.PADDING, 0, buttonN)
 end
 
 
 
--- REPLACE
--- handled = _ok( )
+-- REPLACE handled = _ok( )
 function Cs.input:_ok()
 	self._gui._ignoreKeyboardInputThisFrame = true
 	if (not self:isFocused()) then
@@ -4575,8 +4523,7 @@ end
 
 
 
--- OVERRIDE
--- setActive( state )
+-- OVERRIDE setActive( state )
 function Cs.input:setActive(state)
 	if (state == false) then
 		self:blur()
@@ -4586,8 +4533,7 @@ end
 
 
 
--- REPLACE
--- _updateLayoutSize( )
+-- REPLACE _updateLayoutSize( )
 function Cs.input:_updateLayoutSize()
 	local font = self:getFont()
 	self._textWidth = font:getWidth(self._text)
@@ -4599,8 +4545,7 @@ function Cs.input:_updateLayoutSize()
 	self._field:setWidth(self._layoutInnerWidth)
 end
 
--- OVERRIDE
--- _expandLayout( [ expandWidth, expandHeight ] )
+-- OVERRIDE _expandLayout( [ expandWidth, expandHeight ] )
 function Cs.input:_expandLayout(expandW, expandH)
 	Cs.input.super._expandLayout(self, expandW, expandH)
 	self._layoutInnerWidth = self._layoutWidth-2*self.PADDING

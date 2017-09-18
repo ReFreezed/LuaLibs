@@ -30,6 +30,11 @@
 --=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 --=  SOFTWARE.
 --=
+--=-------------------------------------------------------------
+--=
+--=  TODO:
+--=  - Introduce printing/logging levels.
+--=
 --==============================================================
 
 	update
@@ -286,7 +291,7 @@ function network.update()
 		-- Receive
 		elseif (eType == 'receive') then
 			local encodedData = e.data
-			printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
+			-- printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
 			local data, err = decode(encodedData)
 			if (err) then
 				printf('Error: Could not decode message from %s: %s', tostring(peer), err)
@@ -389,7 +394,7 @@ end
 
 
 -- success, errorMessage = sendToClient( clientId, data [, channel=1, flag="reliable" ] )
-function network.sendToClient(cid, data)
+function network.sendToClient(cid, data, channel, flag)
 	-- assert(type(cid) == 'number')
 	if (not network._isServer) then
 		return false, 'we are not a server'
@@ -402,7 +407,7 @@ function network.sendToClient(cid, data)
 	if (not client) then
 		return false, 'no client with ID '..tostring(cid)
 	end
-	printf('Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
+	-- printf('Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
 	client.peer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end
@@ -418,7 +423,7 @@ function network.broadcast(data)
 	if (not encodedData) then
 		return false, err
 	end
-	printf('Broadcasting message: %s', getDataStringSummary(encodedData))
+	-- printf('Broadcasting message: %s', getDataStringSummary(encodedData))
 	network._host:broadcast(encodedData)
 	return true
 end
@@ -581,7 +586,7 @@ end
 
 
 -- success, errorMessage = sendToServer( data [, channel=1, flag="reliable" ] )
-function network.sendToServer(data)
+function network.sendToServer(data, channel, flag)
 	if (not network._isClient) then
 		return false, 'we are not a client'
 	elseif (not network._isConnectedToServer) then
@@ -591,7 +596,7 @@ function network.sendToServer(data)
 	if (not encodedData) then
 		return nil, err
 	end
-	printf('Sending message to server: %s', getDataStringSummary(encodedData))
+	-- printf('Sending message to server: %s', getDataStringSummary(encodedData))
 	network._serverPeer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end

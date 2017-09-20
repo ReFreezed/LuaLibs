@@ -64,6 +64,8 @@ local json = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', 
 
 local network = {
 
+	debug_printMessageEvents = false, -- (can potentially spam the console a lot if true)
+
 	DEFAULT_SERVER_IP = '127.0.0.1',
 	MIN_PORT = 1024, MAX_PORT = 65535,
 
@@ -291,7 +293,9 @@ function network.update()
 		-- Receive
 		elseif (eType == 'receive') then
 			local encodedData = e.data
-			-- printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
+			if (network.debug_printMessageEvents) then
+				printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
+			end
 			local data, err = decode(encodedData)
 			if (err) then
 				printf('Error: Could not decode message from %s: %s', tostring(peer), err)

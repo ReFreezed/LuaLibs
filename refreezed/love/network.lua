@@ -30,11 +30,6 @@
 --=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 --=  SOFTWARE.
 --=
---=-------------------------------------------------------------
---=
---=  TODO:
---=  - Introduce printing/logging levels.
---=
 --==============================================================
 
 	update
@@ -50,6 +45,7 @@
 	sendToServer
 	getServerPing
 
+	getLogLevel, setLogLevel, isLogLevel, isLogging
 	getMaxPeers, setMaxPeers
 	getPort, setPort, isPortValid
 	getServerIp, setServerIp
@@ -63,16 +59,19 @@ local enet = require('enet') -- (LÖVE)
 local json = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
 
 local network = {
+	_VERSION = 1,
 
-	debug_printMessageEvents = false, -- (can potentially spam the console a lot if true)
-
+	-- Contstants
+	DEFAULT_LOG_LEVEL = 'events',
 	DEFAULT_SERVER_IP = '127.0.0.1',
 	MIN_PORT = 1024, MAX_PORT = 65535,
 
 	-- Settings
+	_logLevel = 3,
 	_maxPeers = 64,
 	_serverIp = '127.0.0.1', _port = 0,
 
+	-- Variables
 	_connectedClients = {},
 	_host = nil,
 	_isConnectedToServer = false, _isTryingToConnectToServer = false, _serverPeer = nil,
@@ -90,6 +89,18 @@ local network = {
 
 }
 
+local logLevelCodes, logLevels = {}, {
+	[5] = 'all',
+	[4] = 'messages', -- same as all
+	[3] = 'events', -- all except messages (default)
+	[2] = 'state', -- server/client start/stop
+	[1] = 'important', -- errors and warnings
+	[0] = 'none',
+}
+for levelCode, level in pairs(logLevels) do
+	logLevelCodes[level] = levelCode
+end
+
 
 
 --==============================================================
@@ -101,7 +112,7 @@ local disconnectClientAtIndex, forgetClientAtIndex
 local encode, decode
 local getDataStringSummary
 local itemWith
-local printf
+local printf, logprint
 local traversePeers
 local trigger
 
@@ -135,7 +146,7 @@ function disconnectClientAtIndex(i, when, code)
 	local peer = client.peer
 	local method = peer['disconnect'..(when and '_'..when or '')]
 		or error('bad "when" argument '..tostring(when))
-	printf('Disconnecting client %s (%d)', client.address, (code or 0))
+	logprint('events', 'Disconnecting client %s (%d)', client.address, (code or 0))
 	method(peer, (code or 0))
 	forgetClientAtIndex(i)
 end
@@ -173,7 +184,7 @@ end
 -- shortMessage = getDataStringSummary( dataStr )
 function getDataStringSummary(dataStr)
 	dataStr = dataStr:gsub('\r?\n', ' ')
-	return (#dataStr > 100 and dataStr:sub(1, 70)..'...'..dataStr:sub(#dataStr-30) or dataStr)
+	return (#dataStr > 200 and dataStr:sub(1, 150)..' ... '..dataStr:sub(#dataStr-50) or dataStr)
 end
 
 
@@ -197,6 +208,14 @@ function printf(s, ...)
 	print(('[%s@%s] %s'):format(hostType, timeStr, s:format(...)))
 end
 network._printf = printf -- expose to network module extensions
+
+-- logprint( level, formatString, ... )
+function logprint(level, ...)
+	if (network._logLevel >= logLevelCodes[level]) then
+		printf(...)
+	end
+end
+network._logprint = logprint -- expose to network module extensions
 
 
 
@@ -259,12 +278,12 @@ function network.update()
 					peer = peer,
 					address = tostring(peer),
 				}
-				printf('Event: Client connected: %s (%d)', client.address, code)
+				logprint('events', 'Event: Client connected: %s (%d)', client.address, code)
 				table.insert(network._connectedClients, client)
 				trigger('onClientAdded', client.id)
 
 			elseif (network._isClient) then
-				printf('Event: Connected to server: %s (%d)', tostring(network._serverPeer), code)
+				logprint('events', 'Event: Connected to server: %s (%d)', tostring(network._serverPeer), code)
 				network._isConnectedToServer = true
 				network._isTryingToConnectToServer = false
 				trigger('onServerConnect')
@@ -275,7 +294,7 @@ function network.update()
 			local code = e.data
 
 			if (network._isServer) then
-				printf('Event: Client disconnected: %s (%d)', tostring(peer), code)
+				logprint('events', 'Event: Client disconnected: %s (%d)', tostring(peer), code)
 				local client, i = itemWith(network._connectedClients, 'peer', peer)
 				if (client) then
 					forgetClientAtIndex(i)
@@ -283,9 +302,9 @@ function network.update()
 
 			elseif (network._isClient) then
 				if not (network._isConnectedToServer or network._isTryingToConnectToServer) then
-					printf('WARNING: Non-server peer disconnected: %s (%d)', tostring(peer), code)
+					logprint('important', 'WARNING: Non-server peer disconnected: %s (%d)', tostring(peer), code)
 				else
-					printf('Event: Server disconnected: %s (%d)', tostring(peer), code)
+					logprint('events', 'Event: Server disconnected: %s (%d)', tostring(peer), code)
 					network.disconnectFromServer()
 				end
 			end
@@ -293,12 +312,12 @@ function network.update()
 		-- Receive
 		elseif (eType == 'receive') then
 			local encodedData = e.data
-			if (network.debug_printMessageEvents) then
-				printf('Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
+			if (network._logLevel >= 4) then
+				logprint('messages', 'Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
 			end
 			local data, err = decode(encodedData)
 			if (err) then
-				printf('Error: Could not decode message from %s: %s', tostring(peer), err)
+				logprint('important', 'ERROR: Could not decode message from %s: %s', tostring(peer), err)
 			else
 
 				if (network._isServer) then
@@ -332,16 +351,16 @@ function network.startServer()
 	elseif (network._port == 0) then
 		return false, 'port has not been set'
 	end
-	printf('Starting server...')
+	logprint('state', 'Starting server...')
 	-- Note: Trying to start two servers on the same host results in failure here
 	local host, err = enet.host_create('*:'..network._port, network._maxPeers)
 	if (not host) then
-		printf('Could not create host - server start aborted')
+		logprint('important', 'ERROR: Could not create host - server start aborted: %s', err)
 		return false, err
 	end
 	network._host = host
 	network._isServer = true
-	printf('Server started')
+	logprint('state', 'Server started')
 	return true
 end
 
@@ -351,7 +370,7 @@ function network.stopServer(code)
 	if (not network._isServer) then
 		return false, 'we are not a server'
 	end
-	printf('Stopping server...')
+	logprint('state', 'Stopping server...')
 
 	-- Disconnect all clients
 	for i = #network._connectedClients, 1, -1 do
@@ -363,7 +382,7 @@ function network.stopServer(code)
 	network._host = nil
 	network._isServer = false
 
-	printf('Server stopped')
+	logprint('state', 'Server stopped')
 	return true
 end
 
@@ -411,7 +430,9 @@ function network.sendToClient(cid, data, channel, flag)
 	if (not client) then
 		return false, 'no client with ID '..tostring(cid)
 	end
-	-- printf('Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
+	if (network._logLevel >= 4) then
+		logprint('messages', 'Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
+	end
 	client.peer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end
@@ -427,7 +448,9 @@ function network.broadcast(data)
 	if (not encodedData) then
 		return false, err
 	end
-	-- printf('Broadcasting message: %s', getDataStringSummary(encodedData))
+	if (network._logLevel >= 4) then
+		logprint('messages', 'Broadcasting message: %s', getDataStringSummary(encodedData))
+	end
 	network._host:broadcast(encodedData)
 	return true
 end
@@ -464,8 +487,12 @@ function network.kickClient(cid, data, code)
 	if (not client) then
 		return false, 'no client with ID '..tostring(cid)
 	end
-	printf('Queuing disconnection of client %s (%d) with message: %s',
-		client.address, (code or 0), getDataStringSummary(encodedData))
+	if (network._logLevel >= 4) then
+		logprint('messages', 'Queuing disconnection of client %s (%d) with message: %s',
+			client.address, (code or 0), getDataStringSummary(encodedData))
+	else
+		logprint('events', 'Queuing disconnection of client %s (%d)', client.address, (code or 0))
+	end
 	client.peer:send(encodedData)
 	disconnectClientAtIndex(i, 'later', (code or 0)) -- "later" needed for message to arrive
 	network._host:flush()
@@ -501,15 +528,15 @@ function network.startClient()
 	elseif (network._host) then
 		return false, 'host already created'
 	end
-	printf('Starting client...')
+	logprint('state', 'Starting client...')
 	local host, err = enet.host_create()
 	if (not host) then
-		printf('Could not create host - client start aborted')
+		logprint('important', 'ERROR: Could not create host - client start aborted: %s', err)
 		return false, err
 	end
 	network._host = host
 	network._isClient = true
-	printf('Client started')
+	logprint('state', 'Client started')
 	return true
 end
 
@@ -518,12 +545,12 @@ function network.stopClient()
 	if (not network._isClient) then
 		return false, 'we are not a client'
 	end
-	printf('Stopping client...')
+	logprint('state', 'Stopping client...')
 	network.disconnectFromServer()
 	network._host:destroy()
 	network._host = nil
 	network._isClient = false
-	printf('Client stopped')
+	logprint('state', 'Client stopped')
 	return true
 end
 
@@ -545,10 +572,9 @@ function network.connectToServer()
 	elseif (network._port == 0) then
 		return false, 'port has not been set'
 	end
-	printf('Connecting to server...')
 	network._serverPeer = assert(network._host:connect(network._serverIp..':'..network._port))
 	network._isTryingToConnectToServer = true
-	printf('Target server: %s', tostring(network._serverPeer))
+	logprint('state', 'Connecting to server (%s)...', tostring(network._serverPeer))
 	return true
 end
 
@@ -560,7 +586,7 @@ function network.disconnectFromServer(code)
 	elseif (not network._serverPeer) then
 		return false, 'not connected to any server'
 	end
-	printf('Disconnecting from server...')
+	logprint('state', 'Disconnecting from server...')
 	local wasConnectedToServer = network._isConnectedToServer
 	network._serverPeer:disconnect_now(code or 0) -- TODO: Figure out how to use disconnect+flush instead of disconnect_now
 	-- network._host:flush()
@@ -568,7 +594,7 @@ function network.disconnectFromServer(code)
 	network._isTryingToConnectToServer = false
 	network._serverPeer = nil
 	trigger(wasConnectedToServer and 'onServerDisconnect' or 'onAbortServerConnect')
-	printf('Disconnected from server')
+	logprint('state', 'Disconnected from server')
 	return true
 end
 
@@ -600,7 +626,9 @@ function network.sendToServer(data, channel, flag)
 	if (not encodedData) then
 		return nil, err
 	end
-	-- printf('Sending message to server: %s', getDataStringSummary(encodedData))
+	if (network._logLevel >= 4) then
+		logprint('messages', 'Sending message to server: %s', getDataStringSummary(encodedData))
+	end
 	network._serverPeer:send(encodedData, (channel or 1)-1, flag)
 	return true
 end
@@ -624,6 +652,36 @@ end
 
 
 
+-- level = getLogLevel( )
+function network.getLogLevel()
+	return logLevels[network._logLevel]
+end
+
+-- success, errorMessage = setLogLevel( level )
+function network.setLogLevel(level)
+	local levelCode = logLevelCodes[level]
+	if (not levelCode) then
+		return false, 'bad logging level '..tostring(level)
+	end
+	network._logLevel = levelCode
+	return true
+end
+
+-- state = isLogLevel( level )
+function network.isLogLevel(level)
+	return (network._logLevel == logLevelCodes[level])
+end
+
+-- state = isLogging( [ level=any ] )
+function network.isLogging(level)
+	local levelCode = (not level and 1)
+		or logLevelCodes[level]
+		or error('bad logging level '..tostring(level))
+	return (network._logLevel >= levelCode)
+end
+
+
+
 -- count = getMaxPeers( )
 function network.getMaxPeers()
 	return network._maxPeers
@@ -633,7 +691,7 @@ end
 function network.setMaxPeers(count)
 	assert(type(count) == 'number' and count >= 0)
 	if (network._isServer) then
-		printf('WARNING: Max peers changed while being a server')
+		logprint('important', 'WARNING: Max peers changed while being a server')
 	end
 	network._maxPeers = count
 end
@@ -649,7 +707,7 @@ end
 function network.setPort(port)
 	assert(network.isPortValid(port))
 	if (network._isServer) or (network._isClient and network._serverPeer) then
-		printf('WARNING: Port changed while being a server or a connected client')
+		logprint('important', 'WARNING: Port changed while being a server or a connected client')
 	end
 	network._port = port
 end
@@ -671,7 +729,7 @@ end
 function network.setServerIp(ip)
 	assert(type(ip) == 'string' and ip ~= '')
 	if (network._isClient and network._serverPeer) then
-		printf('WARNING: Server IP changed while being a connected client')
+		logprint('important', 'WARNING: Server IP changed while being a connected client')
 	end
 	network._serverIp = ip
 end

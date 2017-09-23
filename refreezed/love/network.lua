@@ -283,7 +283,7 @@ function network.update()
 				trigger('onClientAdded', client.id)
 
 			elseif (network._isClient) then
-				logprint('events', 'Event: Connected to server: %s (%d)', tostring(network._serverPeer), code)
+				logprint('events', 'Event: Connected to server: %s (%d)', network._serverPeer, code)
 				network._isConnectedToServer = true
 				network._isTryingToConnectToServer = false
 				trigger('onServerConnect')
@@ -294,7 +294,7 @@ function network.update()
 			local code = e.data
 
 			if (network._isServer) then
-				logprint('events', 'Event: Client disconnected: %s (%d)', tostring(peer), code)
+				logprint('events', 'Event: Client disconnected: %s (%d)', peer, code)
 				local client, i = itemWith(network._connectedClients, 'peer', peer)
 				if (client) then
 					forgetClientAtIndex(i)
@@ -302,9 +302,9 @@ function network.update()
 
 			elseif (network._isClient) then
 				if not (network._isConnectedToServer or network._isTryingToConnectToServer) then
-					logprint('important', 'WARNING: Non-server peer disconnected: %s (%d)', tostring(peer), code)
+					logprint('important', 'WARNING: Non-server peer disconnected: %s (%d)', peer, code)
 				else
-					logprint('events', 'Event: Server disconnected: %s (%d)', tostring(peer), code)
+					logprint('events', 'Event: Server disconnected: %s (%d)', peer, code)
 					network.disconnectFromServer()
 				end
 			end
@@ -313,11 +313,15 @@ function network.update()
 		elseif (eType == 'receive') then
 			local encodedData = e.data
 			if (network._logLevel >= 4) then
-				logprint('messages', 'Event: Got message from %s: %s', tostring(peer), getDataStringSummary(encodedData))
+				if (network._isClient) then
+					logprint('messages', '<< %s', getDataStringSummary(encodedData))
+				else
+					logprint('messages', '<< %s %s', peer, getDataStringSummary(encodedData))
+				end
 			end
 			local data, err = decode(encodedData)
 			if (err) then
-				logprint('important', 'ERROR: Could not decode message from %s: %s', tostring(peer), err)
+				logprint('important', 'ERROR: Could not decode message from %s: %s', peer, err)
 			else
 
 				if (network._isServer) then
@@ -431,7 +435,7 @@ function network.sendToClient(cid, data, channel, flag)
 		return false, 'no client with ID '..tostring(cid)
 	end
 	if (network._logLevel >= 4) then
-		logprint('messages', 'Sending message to client %s: %s', client.address, getDataStringSummary(encodedData))
+		logprint('messages', '>> %s %s', client.address, getDataStringSummary(encodedData))
 	end
 	client.peer:send(encodedData, (channel or 1)-1, flag)
 	return true
@@ -449,7 +453,7 @@ function network.broadcast(data)
 		return false, err
 	end
 	if (network._logLevel >= 4) then
-		logprint('messages', 'Broadcasting message: %s', getDataStringSummary(encodedData))
+		logprint('messages', '>> %s', getDataStringSummary(encodedData))
 	end
 	network._host:broadcast(encodedData)
 	return true
@@ -574,7 +578,7 @@ function network.connectToServer()
 	end
 	network._serverPeer = assert(network._host:connect(network._serverIp..':'..network._port))
 	network._isTryingToConnectToServer = true
-	logprint('state', 'Connecting to server (%s)...', tostring(network._serverPeer))
+	logprint('state', 'Connecting to server (%s)...', network._serverPeer)
 	return true
 end
 
@@ -627,7 +631,7 @@ function network.sendToServer(data, channel, flag)
 		return nil, err
 	end
 	if (network._logLevel >= 4) then
-		logprint('messages', 'Sending message to server: %s', getDataStringSummary(encodedData))
+		logprint('messages', '>> %s', getDataStringSummary(encodedData))
 	end
 	network._serverPeer:send(encodedData, (channel or 1)-1, flag)
 	return true

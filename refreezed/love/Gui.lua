@@ -241,7 +241,7 @@ local checkValidSoundKey
 local copyTable
 local coroutineIterator, newIteratorCoroutine
 local drawBackground
-local errorf, assertArgType
+local errorf, assertArg
 local F
 local getTextDimensions, getTextHeight
 local lerp
@@ -362,20 +362,33 @@ function errorf(i, s, ...)
 	end
 end
 
--- value = assertArgType( functionName, argumentNumber, value, expectedValueType... )
+-- value = assertArg( [ functionName=auto, ] argumentNumber, value, expectedValueType... [, depth=1 ] )
 do
-	local function _assertArgType(depth, name, n, v, expectedType, ...)
+	local function assertArgTypes(fName, n, v, ...)
 		local vType = type(v)
-		if (vType ~= expectedType) then
-			errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, name, expectedType, vType)
-		elseif (...) then
-			return _assertArgType(depth+1, name, n, v, ...)
+		local varargCount = select('#', ...)
+		local lastArg = select(varargCount, ...)
+		local hasDepthArg = (type(lastArg) == 'number')
+		local typeCount = varargCount+(hasDepthArg and -1 or 0)
+		for i = 1, typeCount do
+			if (vType == select(i, ...)) then
+				return v
+			end
 		end
-		return v
+		local depth = 3+(hasDepthArg and lastArg or 1)
+		if (not fName) then
+			fName = debug.traceback('', depth-2):match(": in function '(.-)'") or '?'
+		end
+		local expects = table.concat({...}, ' or ', 1, typeCount)
+		errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
 	end
 
-	function assertArgType(name, n, v, ...)
-		return _assertArgType(4, name, n, v, ...)
+	function assertArg(fNameOrArgNum, ...)
+		if (type(fNameOrArgNum) == 'string') then
+			return assertArgTypes(fNameOrArgNum, ...)
+		else
+			return assertArgTypes(nil, fNameOrArgNum, ...)
+		end
 	end
 
 end
@@ -841,7 +854,7 @@ end
 
 -- sound = getDefaultSound( soundKey )
 function Gui:getDefaultSound(soundK)
-	assertArgType('soundKey', 1, soundK, 'string')
+	assertArg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	return self._defaultSounds[soundK]
 end
@@ -850,7 +863,7 @@ end
 -- setDefaultSound( soundKey, nil ) -- remove sound
 -- Note: 'sound' is the value sent to the GUI sound player callback
 function Gui:setDefaultSound(soundK, sound)
-	assertArgType('soundKey', 1, soundK, 'string')
+	assertArg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	self._defaultSounds[soundK] = sound
 end
@@ -1731,7 +1744,7 @@ end
 
 -- oldDataTable = swapData( newDataTable )
 function Cs.element:swapData(data)
-	assertArgType('swapData', 1, data, 'table')
+	assertArg(1, data, 'table')
 	local oldData = self._data
 	self._data, self.data = data, data
 	return oldData
@@ -2065,14 +2078,14 @@ end
 
 -- sound = getSound( soundKey )
 function Cs.element:getSound(soundK)
-	assertArgType('soundKey', 1, soundK, 'string')
+	assertArg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	return self._sounds[soundK]
 end
 
 -- sound = getResultingSound( soundKey )
 function Cs.element:getResultingSound(soundK)
-	assertArgType('soundKey', 1, soundK, 'string')
+	assertArg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	local sound = self._sounds[soundK]
 	if (sound == nil) then
@@ -2098,7 +2111,7 @@ end
 -- setSound( soundKey, sound )
 -- setSound( soundKey, nil ) -- remove sound
 function Cs.element:setSound(soundK, sound)
-	assertArgType('soundKey', 1, soundK, 'string')
+	assertArg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	self._sounds[soundK] = sound
 end
@@ -2918,7 +2931,7 @@ end
 
 -- sort( sortFunction )
 function Cs.container:sort(f)
-	assertArgType('sort', 1, f, 'function')
+	assertArg(1, f, 'function')
 	table.sort(self, f)
 	scheduleLayoutUpdateIfDisplayed(self)
 end

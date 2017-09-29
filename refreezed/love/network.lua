@@ -205,7 +205,8 @@ end
 function printf(s, ...)
 	local hostType = (network._isServer and 'server') or (network._isClient and 'client') or 'network'
 	local timeStr = os.date('%H:%M:%S')
-	print(('[%s@%s] %s'):format(hostType, timeStr, s:format(...)))
+	s = s:format(...)
+	print(('[%s@%s] %s'):format(hostType, timeStr, s))
 end
 network._printf = printf -- expose to network module extensions
 

@@ -32,31 +32,47 @@
 --=
 --==============================================================
 
+	Info
+
+	All peers have a connection ID, and in the case of clients,
+	their connection IDs are called client IDs in this module.
+
+--==============================================================
+
 	update
 
+	-- Server
 	startServer, stopServer, isServer
 	getClient, getClientCount
 	sendToClient, broadcast
 	disconnectClient, kickClient
 	getClientPing
 
+	-- Client
 	startClient, stopClient, isClient
 	connectToServer, disconnectFromServer, hasServer, isConnectedToServer, isConnectingToServer
 	sendToServer
+	getServerConnectId
 	getServerPing
 
+	-- Both server and client
+	collectInfo, getIncomingBandwidth, getOutgoingBandwidth
 	getLogLevel, setLogLevel, isLogLevel, isLogging
 	getMaxPeers, setMaxPeers
 	getPort, setPort, isPortValid
 	getServerIp, setServerIp
 	stop, isActive
 
+	-- Utils
+	formatBytes, formatBits, formatSpeed
+
 --============================================================]]
 
 
 
-local enet = require('enet') -- (LÖVE)
-local json = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
+local enet   = require('enet') -- (LÖVE)
+local socket = require('socket') -- (LÖVE)
+local json   = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
 
 local network = {
 	_VERSION = 1,
@@ -67,6 +83,7 @@ local network = {
 	MIN_PORT = 1024, MAX_PORT = 65535,
 
 	-- Settings
+	_isCollectingInfo = false,
 	_logLevel = 3,
 	_maxPeers = 64,
 	_serverIp = '127.0.0.1', _port = 0,
@@ -76,6 +93,7 @@ local network = {
 	_host = nil,
 	_isConnectedToServer = false, _isTryingToConnectToServer = false, _serverPeer = nil,
 	_isServer = false, _isClient = false,
+	_peerInfos = {},
 
 	-- Event callbacks
 	onClientAdded = nil, -- function( clientId )
@@ -111,8 +129,11 @@ local coroutineIterator, newIteratorCoroutine
 local disconnectClientAtIndex, forgetClientAtIndex
 local encode, decode
 local getDataStringSummary
+local getPeerInfo
+local ipairsr
 local itemWith
-local printf, logprint
+local printf, log
+local sendToPeer
 local traversePeers
 local trigger
 
@@ -146,7 +167,7 @@ function disconnectClientAtIndex(i, when, code)
 	local peer = client.peer
 	local method = peer['disconnect'..(when and '_'..when or '')]
 		or error('bad "when" argument '..tostring(when))
-	logprint('events', 'Disconnecting client %s (%d)', client.address, (code or 0))
+	log('events', 'Disconnecting client %s (%d)', client.address, (code or 0))
 	method(peer, (code or 0))
 	forgetClientAtIndex(i)
 end
@@ -154,7 +175,7 @@ end
 -- forgetClientAtIndex( index )
 function forgetClientAtIndex(i)
 	local client = table.remove(network._connectedClients, i)
-	if (client) then
+	if client then
 		trigger('onClientRemoved', client.id)
 	end
 end
@@ -164,7 +185,7 @@ end
 -- encodedData, errorMessage = encode( data )
 function encode(data)
 	local ok, encodedDataOrErr = pcall(json.encode, data)
-	if (not ok) then
+	if not ok then
 		return nil, encodedDataOrErr
 	end
 	return encodedDataOrErr
@@ -173,7 +194,7 @@ end
 -- data, errorMessage = decode( encodedData )
 function decode(encodedData)
 	local ok, dataOrErr = pcall(json.decode, encodedData)
-	if (not ok) then
+	if not ok then
 		return nil, dataOrErr
 	end
 	return dataOrErr
@@ -189,10 +210,42 @@ end
 
 
 
+-- info = getPeerInfo( clientId [, onlyGetExisting=false ] )
+function getPeerInfo(cid, onlyGetExisting)
+	local infos = network._peerInfos
+	local info = infos[cid]
+	if (not info and not onlyGetExisting) then
+		info = {
+			totalReceiveCount = 0,
+			totalSendCount    = 0,
+			recentReceived = {--[[ {time=timestamp, amount=dataLength}... ]]},
+			recentSent     = {--[[ {time=timestamp, amount=dataLength}... ]]},
+		}
+		infos[cid] = info
+	end
+	return info
+end
+
+
+
+-- for index, item in ipairsr( table ) do
+do
+	local function iprev(t, i)
+		i = i-1
+		local v = t[i]
+		if v ~= nil then  return i, v  end
+	end
+	function ipairsr(t)
+		return iprev, t, #t+1
+	end
+end
+
+
+
 -- item, index = itemWith( table, key, value )
 function itemWith(t, k, v)
 	for i, item in ipairs(t) do
-		if (item[k] == v) then
+		if item[k] == v then
 			return item, i
 		end
 	end
@@ -210,13 +263,30 @@ function printf(s, ...)
 end
 network._printf = printf -- expose to network module extensions
 
--- logprint( level, formatString, ... )
-function logprint(level, ...)
-	if (network._logLevel >= logLevelCodes[level]) then
+-- log( level, formatString, ... )
+function log(level, ...)
+	if network._logLevel >= logLevelCodes[level] then
 		printf(...)
 	end
 end
-network._logprint = logprint -- expose to network module extensions
+network._log = log -- expose to network module extensions
+
+
+
+-- sendToPeer( peer, dataString [, channel=1, flag="reliable" ] )
+function sendToPeer(peer, dataStr, channel, flag)
+	channel = (channel or 1)-1
+	flag = (flag or 'reliable')
+	if network._isCollectingInfo then
+		local info = getPeerInfo(peer:connect_id())
+		info.totalSendCount = info.totalSendCount+1
+		table.insert(info.recentSent, {
+			time = socket.gettime(),
+			amount = #dataStr,
+		})
+	end
+	return peer:send(dataStr, channel, flag)
+end
 
 
 
@@ -238,7 +308,7 @@ end
 -- ... = trigger( eventPropertyName, ... )
 function trigger(k, ...)
 	local cb = network[k]
-	if (not cb) then
+	if not cb then
 		return nil
 	end
 	return cb(...)
@@ -255,82 +325,114 @@ network._trigger = trigger -- expose to network module extensions
 
 -- update( )
 function network.update()
-	if (not network.isActive()) then
+	if not network.isActive() then
 		return
 	end
+
+	-- Update info.
+	local minTime = socket.gettime()-1
+	for cid, info in pairs(network._peerInfos) do
+
+		-- Remove old transfer info from recent.
+		for _, transferInfos in ipairs{info.recentReceived, info.recentSent} do
+			for i, transferInfo in ipairsr(transferInfos) do
+				if transferInfo.time < minTime then
+					for count = 1, i do
+						table.remove(transferInfos, 1)
+					end
+					break
+				end
+			end
+		end
+
+	end
+
+	-- Handle events.
 	while true do
 		local e = nil
 		if not (network._isClient and not network._serverPeer) then
-			-- As a client we must be connected or else host.service will throw an error!
+			-- As a client we must be connected or else service() will throw an error!
 			e = network._host:service()
 		end
-		if (not e) then
+		if not e then
 			break
 		end
 		local eType, peer = e.type, e.peer
 
-		-- Connect
-		if (eType == 'connect') then
+		-- Connect.
+		if eType == 'connect' then
 			local code = e.data
 
-			if (network._isServer) then
+			if network._isServer then
 				local client = {
 					id = peer:connect_id(),
 					peer = peer,
 					address = tostring(peer),
 				}
-				logprint('events', 'Event: Client connected: %s (%d)', client.address, code)
+				log('events', 'Event: Client connected: %s (%d)', client.address, code)
 				table.insert(network._connectedClients, client)
 				trigger('onClientAdded', client.id)
 
-			elseif (network._isClient) then
-				logprint('events', 'Event: Connected to server: %s (%d)', network._serverPeer, code)
+			elseif network._isClient then
+				log('events', 'Event: Connected to server: %s (%d)', network._serverPeer, code)
 				network._isConnectedToServer = true
 				network._isTryingToConnectToServer = false
 				trigger('onServerConnect')
 			end
 
-		-- Disconnect
-		elseif (eType == 'disconnect') then
+		-- Disconnect.
+		elseif eType == 'disconnect' then
 			local code = e.data
 
-			if (network._isServer) then
-				logprint('events', 'Event: Client disconnected: %s (%d)', peer, code)
+			if network._isServer then
+				log('events', 'Event: Client disconnected: %s (%d)', peer, code)
 				local client, i = itemWith(network._connectedClients, 'peer', peer)
-				if (client) then
+				if client then
 					forgetClientAtIndex(i)
 				end
 
-			elseif (network._isClient) then
+			elseif network._isClient then
 				if not (network._isConnectedToServer or network._isTryingToConnectToServer) then
-					logprint('important', 'WARNING: Non-server peer disconnected: %s (%d)', peer, code)
+					log('important', 'WARNING: Non-server peer disconnected: %s (%d)', peer, code)
 				else
-					logprint('events', 'Event: Server disconnected: %s (%d)', peer, code)
+					log('events', 'Event: Server disconnected: %s (%d)', peer, code)
 					network.disconnectFromServer()
 				end
 			end
 
-		-- Receive
-		elseif (eType == 'receive') then
+		-- Receive.
+		elseif eType == 'receive' then
 			local encodedData = e.data
-			if (network._logLevel >= 4) then
-				if (network._isClient) then
-					logprint('messages', '<< %s', getDataStringSummary(encodedData))
+
+			-- Log message.
+			if network._logLevel >= 4 then
+				if network._isClient then
+					log('messages', '<< %s', getDataStringSummary(encodedData))
 				else
-					logprint('messages', '<< %s %s', peer, getDataStringSummary(encodedData))
+					log('messages', '<< %s %s', peer, getDataStringSummary(encodedData))
 				end
 			end
-			local data, err = decode(encodedData)
-			if (err) then
-				logprint('important', 'ERROR: Could not decode message from %s: %s', peer, err)
-			else
 
-				if (network._isServer) then
+			-- Collect info.
+			if network._isCollectingInfo then
+				local info = getPeerInfo(peer:connect_id())
+				info.totalReceiveCount = info.totalReceiveCount+1
+				table.insert(info.recentReceived, {
+					time = socket.gettime(),
+					amount = #encodedData,
+				})
+			end
+
+			-- Handle data.
+			local data, err = decode(encodedData)
+			if err then
+				log('important', 'ERROR: Could not decode message from %s: %s', peer, err)
+			else
+				if network._isServer then
 					local cid = peer:connect_id()
 					trigger('onReceiveMessageFromClient', data, cid)
 					trigger('onReceiveMessage', data, cid)
-
-				elseif (network._isClient) then
+				elseif network._isClient then
 					trigger('onReceiveMessageFromServer', data)
 					trigger('onReceiveMessage', data, nil)
 				end
@@ -339,43 +441,47 @@ function network.update()
 		end
 		-- void
 	end
+
 end
 
 
 
+-- Server
 --==============================================================
 
 
 
 -- success, errorMessage = startServer( )
 function network.startServer()
-	if (network._isServer) then
+	if network._isServer then
 		return false, 'we are already a server'
-	elseif (network._host) then
+	elseif network._host then
 		return false, 'host already created'
-	elseif (network._port == 0) then
+	elseif network._port == 0 then
 		return false, 'port has not been set'
 	end
-	logprint('state', 'Starting server...')
+	log('state', 'Starting server...')
+
 	-- Note: Trying to start two servers on the same host results in failure here
 	local host, err = enet.host_create('*:'..network._port, network._maxPeers)
-	if (not host) then
-		logprint('important', 'ERROR: Could not create host - server start aborted: %s', err)
+	if not host then
+		log('important', 'ERROR: Could not create host - server start aborted: %s', err)
 		return false, err
 	end
 	network._host = host
 	network._isServer = true
-	logprint('state', 'Server started')
+
+	log('state', 'Server started')
 	return true
 end
 
 -- success, errorMessage = stopServer( [ code=0 ] )
 function network.stopServer(code)
 	assert(code == nil or type(code) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return false, 'we are not a server'
 	end
-	logprint('state', 'Stopping server...')
+	log('state', 'Stopping server...')
 
 	-- Disconnect all clients
 	for i = #network._connectedClients, 1, -1 do
@@ -387,7 +493,7 @@ function network.stopServer(code)
 	network._host = nil
 	network._isServer = false
 
-	logprint('state', 'Server stopped')
+	log('state', 'Server stopped')
 	return true
 end
 
@@ -401,11 +507,11 @@ end
 -- clientId, errorMessage = getClient( index )
 function network.getClient(i)
 	assert(type(i) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return nil, 'we are not a server'
 	end
 	local client = network._connectedClients[i]
-	if (not client) then
+	if not client then
 		return nil, 'index out of bounds'
 	end
 	return client.id
@@ -413,7 +519,7 @@ end
 
 -- count, errorMessage = getClientCount( )
 function network.getClientCount()
-	if (not network._isServer) then
+	if not network._isServer then
 		return nil, 'we are not a server'
 	end
 	return #network._connectedClients
@@ -424,37 +530,37 @@ end
 -- success, errorMessage = sendToClient( clientId, data [, channel=1, flag="reliable" ] )
 function network.sendToClient(cid, data, channel, flag)
 	-- assert(type(cid) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return false, 'we are not a server'
 	end
 	local encodedData, err = encode(data)
-	if (not encodedData) then
+	if not encodedData then
 		return false, err
 	end
 	local client = itemWith(network._connectedClients, 'id', cid)
-	if (not client) then
+	if not client then
 		return false, 'no client with ID '..tostring(cid)
 	end
-	if (network._logLevel >= 4) then
-		logprint('messages', '>> %s %s', client.address, getDataStringSummary(encodedData))
+	if network._logLevel >= 4 then
+		log('messages', '>> %s %s', client.address, getDataStringSummary(encodedData))
 	end
-	client.peer:send(encodedData, (channel or 1)-1, flag)
+	sendToPeer(client.peer, encodedData, channel, flag)
 	return true
 end
 
 -- success, errorMessage = broadcast( data )
 function network.broadcast(data)
-	if (not network._isServer) then
+	if not network._isServer then
 		return false, 'we are not a server'
-	elseif (not network._connectedClients[1]) then
+	elseif not network._connectedClients[1] then
 		return false, 'no clients to broadcast to'
 	end
 	local encodedData, err = encode(data)
-	if (not encodedData) then
+	if not encodedData then
 		return false, err
 	end
-	if (network._logLevel >= 4) then
-		logprint('messages', '>> %s', getDataStringSummary(encodedData))
+	if network._logLevel >= 4 then
+		log('messages', '>> %s', getDataStringSummary(encodedData))
 	end
 	network._host:broadcast(encodedData)
 	return true
@@ -466,11 +572,11 @@ end
 function network.disconnectClient(cid, code)
 	-- assert(type(cid) == 'number')
 	assert(code == nil or type(code) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return false, 'we are not a server'
 	end
 	local client, i = itemWith(network._connectedClients, 'id', cid)
-	if (not client) then
+	if not client then
 		return false, 'no client with ID '..tostring(cid)
 	end
 	disconnectClientAtIndex(i, nil, (code or 0))
@@ -481,24 +587,24 @@ end
 function network.kickClient(cid, data, code)
 	-- assert(type(cid) == 'number')
 	assert(code == nil or type(code) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return false, 'we are not a server'
 	end
 	local encodedData, err = encode(data)
-	if (not encodedData) then
+	if not encodedData then
 		return false, err
 	end
 	local client, i = itemWith(network._connectedClients, 'id', cid)
-	if (not client) then
+	if not client then
 		return false, 'no client with ID '..tostring(cid)
 	end
-	if (network._logLevel >= 4) then
-		logprint('messages', 'Queuing disconnection of client %s (%d) with message: %s',
+	if network._logLevel >= 4 then
+		log('messages', 'Queuing disconnection of client %s (%d) with message: %s',
 			client.address, (code or 0), getDataStringSummary(encodedData))
 	else
-		logprint('events', 'Queuing disconnection of client %s (%d)', client.address, (code or 0))
+		log('events', 'Queuing disconnection of client %s (%d)', client.address, (code or 0))
 	end
-	client.peer:send(encodedData)
+	sendToPeer(client.peer, encodedData)
 	disconnectClientAtIndex(i, 'later', (code or 0)) -- "later" needed for message to arrive
 	network._host:flush()
 	return true
@@ -507,55 +613,60 @@ end
 
 
 -- ping, errorMessage = getClientPing( clientId )
--- ping: Delay in seconds
 function network.getClientPing(cid)
 	-- assert(type(cid) == 'number')
-	if (not network._isServer) then
+	if not network._isServer then
 		return nil, 'we are not a server'
 	end
 	local client = itemWith(network._connectedClients, 'id', cid)
-	if (not client) then
+	if not client then
 		return nil, 'no client with ID '..tostring(cid)
 	end
-	return client.peer:last_round_trip_time()*0.001
+	return client.peer:round_trip_time()*0.001
 end
 
 
 
+-- Client
 --==============================================================
 
 
 
 -- success, errorMessage = startClient( )
 function network.startClient()
-	if (network._isClient) then
+	if network._isClient then
 		return false, 'we are already a client'
-	elseif (network._host) then
+	elseif network._host then
 		return false, 'host already created'
 	end
-	logprint('state', 'Starting client...')
+	log('state', 'Starting client...')
+
 	local host, err = enet.host_create()
-	if (not host) then
-		logprint('important', 'ERROR: Could not create host - client start aborted: %s', err)
+	if not host then
+		log('important', 'ERROR: Could not create host - client start aborted: %s', err)
 		return false, err
 	end
 	network._host = host
 	network._isClient = true
-	logprint('state', 'Client started')
+
+	log('state', 'Client started')
 	return true
 end
 
 -- success, errorMessage = stopClient( )
 function network.stopClient()
-	if (not network._isClient) then
+	if not network._isClient then
 		return false, 'we are not a client'
 	end
-	logprint('state', 'Stopping client...')
+	log('state', 'Stopping client...')
+
 	network.disconnectFromServer()
+
 	network._host:destroy()
 	network._host = nil
 	network._isClient = false
-	logprint('state', 'Client stopped')
+
+	log('state', 'Client stopped')
 	return true
 end
 
@@ -568,38 +679,45 @@ end
 
 -- success, errorMessage = network.connectToServer( )
 function network.connectToServer()
-	if (not network._isClient) then
+	if not network._isClient then
 		return false, 'we are not a client'
-	elseif (network._isConnectedToServer) then
+	elseif network._isConnectedToServer then
 		return false, 'already connected to server'
-	elseif (network._serverPeer) then
+	elseif network._serverPeer then
 		return false, 'already connecting to server'
-	elseif (network._port == 0) then
+	elseif network._port == 0 then
 		return false, 'port has not been set'
 	end
+
 	network._serverPeer = assert(network._host:connect(network._serverIp..':'..network._port))
 	network._isTryingToConnectToServer = true
-	logprint('state', 'Connecting to server (%s)...', network._serverPeer)
+
+	log('state', 'Connecting to server (%s)...', network._serverPeer)
 	return true
 end
 
 -- success, errorMessage = network.disconnectFromServer( [ code=0 ] )
 function network.disconnectFromServer(code)
 	assert(code == nil or type(code) == 'number')
-	if (not network._isClient) then
+	if not network._isClient then
 		return false, 'we are not a client'
-	elseif (not network._serverPeer) then
+	elseif not network._serverPeer then
 		return false, 'not connected to any server'
 	end
-	logprint('state', 'Disconnecting from server...')
+	log('state', 'Disconnecting from server...')
+
 	local wasConnectedToServer = network._isConnectedToServer
+
 	network._serverPeer:disconnect_now(code or 0) -- TODO: Figure out how to use disconnect+flush instead of disconnect_now
 	-- network._host:flush()
+
 	network._isConnectedToServer = false
 	network._isTryingToConnectToServer = false
 	network._serverPeer = nil
+
 	trigger(wasConnectedToServer and 'onServerDisconnect' or 'onAbortServerConnect')
-	logprint('state', 'Disconnected from server')
+
+	log('state', 'Disconnected from server')
 	return true
 end
 
@@ -622,38 +740,101 @@ end
 
 -- success, errorMessage = sendToServer( data [, channel=1, flag="reliable" ] )
 function network.sendToServer(data, channel, flag)
-	if (not network._isClient) then
+	if not network._isClient then
 		return false, 'we are not a client'
-	elseif (not network._isConnectedToServer) then
+	elseif not network._isConnectedToServer then
 		return false, 'client is not connected to any server'
 	end
 	local encodedData, err = encode(data)
-	if (not encodedData) then
+	if not encodedData then
 		return nil, err
 	end
-	if (network._logLevel >= 4) then
-		logprint('messages', '>> %s', getDataStringSummary(encodedData))
+	if network._logLevel >= 4 then
+		log('messages', '>> %s', getDataStringSummary(encodedData))
 	end
-	network._serverPeer:send(encodedData, (channel or 1)-1, flag)
+	sendToPeer(network._serverPeer, encodedData, channel, flag)
 	return true
 end
 
 
 
--- ping, errorMessage = getServerPing( )
--- ping: Delay in seconds
-function network.getServerPing()
-	if (not network._isClient) then
-		return nil, 'we are not a client'
-	elseif (not network._isConnectedToServer) then
-		return nil, 'client is not connected to any server'
-	end
-	return network._serverPeer:last_round_trip_time()*0.001
+-- connectId = getServerConnectId( )
+-- connectId: Will be nil if we're not connected/connecting.
+function network.getServerConnectId()
+	local peer = network._serverPeer
+	return (peer and peer:connect_id())
 end
 
 
 
+-- ping, errorMessage = getServerPing( )
+function network.getServerPing()
+	if not network._isClient then
+		return nil, 'we are not a client'
+	elseif not network._isConnectedToServer then
+		return nil, 'client is not connected to any server'
+	end
+	return network._serverPeer:round_trip_time()*0.001
+end
+
+
+
+-- Both server and client
 --==============================================================
+
+
+
+-- collectInfo( state )
+function network.collectInfo(state)
+	network._isCollectingInfo = state
+	if not state then
+		network._peerInfos = {} -- Remove existing info.
+	end
+end
+
+-- speed = getIncomingBandwidth( [ connectId=all ] )
+-- speed: Bits per second.
+function network.getIncomingBandwidth(cid)
+	local amount = 0
+	if cid then
+		local info = getPeerInfo(cid, true)
+		if not info then
+			return 0
+		end
+		for _, transferInfo in ipairsr(info.recentReceived) do
+			amount = amount+transferInfo.amount
+		end
+	else
+		for cid, info in pairs(network._peerInfos) do
+			for _, transferInfo in ipairsr(info.recentReceived) do
+				amount = amount+transferInfo.amount
+			end
+		end
+	end
+	return amount*8 -- Convert bytes to bits.
+end
+
+-- speed = getOutgoingBandwidth( [ connectId=all ] )
+-- speed: Bits per second.
+function network.getOutgoingBandwidth(cid)
+	local amount = 0
+	if cid then
+		local info = getPeerInfo(cid, true)
+		if not info then
+			return 0
+		end
+		for _, transferInfo in ipairsr(info.recentSent) do
+			amount = amount+transferInfo.amount
+		end
+	else
+		for cid, info in pairs(network._peerInfos) do
+			for _, transferInfo in ipairsr(info.recentSent) do
+				amount = amount+transferInfo.amount
+			end
+		end
+	end
+	return amount*8 -- Convert bytes to bits.
+end
 
 
 
@@ -665,7 +846,7 @@ end
 -- success, errorMessage = setLogLevel( level )
 function network.setLogLevel(level)
 	local levelCode = logLevelCodes[level]
-	if (not levelCode) then
+	if not levelCode then
 		return false, 'bad logging level '..tostring(level)
 	end
 	network._logLevel = levelCode
@@ -695,8 +876,8 @@ end
 -- setMaxPeers( count )
 function network.setMaxPeers(count)
 	assert(type(count) == 'number' and count >= 0)
-	if (network._isServer) then
-		logprint('important', 'WARNING: Max peers changed while being a server')
+	if network._isServer then
+		log('important', 'WARNING: Max peers changed while being a server')
 	end
 	network._maxPeers = count
 end
@@ -712,7 +893,7 @@ end
 function network.setPort(port)
 	assert(network.isPortValid(port))
 	if (network._isServer) or (network._isClient and network._serverPeer) then
-		logprint('important', 'WARNING: Port changed while being a server or a connected client')
+		log('important', 'WARNING: Port changed while being a server or a connected client')
 	end
 	network._port = port
 end
@@ -734,7 +915,7 @@ end
 function network.setServerIp(ip)
 	assert(type(ip) == 'string' and ip ~= '')
 	if (network._isClient and network._serverPeer) then
-		logprint('important', 'WARNING: Server IP changed while being a connected client')
+		log('important', 'WARNING: Server IP changed while being a connected client')
 	end
 	network._serverIp = ip
 end
@@ -743,9 +924,9 @@ end
 
 -- success, errorMessage = stop( )
 function network.stop()
-	if (network._isServer) then
+	if network._isServer then
 		return network.stopServer()
-	elseif (network._isClient) then
+	elseif network._isClient then
 		return network.stopClient()
 	end
 	return false, 'network is not active'
@@ -754,6 +935,46 @@ end
 -- state = isActive( )
 function network.isActive()
 	return (network._host ~= nil)
+end
+
+
+
+-- Utils
+--==============================================================
+
+
+
+do
+	local function formatNumber(n, units)
+		if n < 100 then
+			return n..' B'
+		end
+		local power = 0
+		repeat
+			power = power+1
+			n = n/1024
+		until (n < 100 or not units[power+1])
+		return ('%.2f %s'):format(n, units[power])
+	end
+
+	-- formattedBytes = formatBytes( bytesNumber )
+	local units = {'kB','MB','GB','TB'}
+	function network.formatBytes(n)
+		return formatNumber(n, units)
+	end
+
+	-- formattedBits = formatBits( bitsNumber )
+	local units = {'kbit','Mbit','Gbit','Tbit'}
+	function network.formatBits(n)
+		return formatNumber(n, units)
+	end
+
+	-- formattedBits = formatSpeed( speed )
+	local units = {'kb/s','Mb/s','Gb/s','Tb/s'}
+	function network.formatSpeed(n)
+		return formatNumber(n, units)
+	end
+
 end
 
 

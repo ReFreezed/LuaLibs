@@ -35,16 +35,23 @@
 	draw
 
 	addFrame, addWaitFrame
-	isActive, stop, restart
+	isActive, isPlaying, isPaused, play, pause, stop, abort, restart
 	progress
 
 --============================================================]]
 
 
 
-local Cutscene = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.class')('Cutscene', {
+local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.class')
+
+local Cutscene = newClass('Cutscene', {
+
 	_currentFrame = 1, _frameTime = 0.0,
+	_isPlaying = true, -- Auto-play cutscene right away when created.
 	_sequence = nil,
+
+	onAbort = nil,
+
 })
 
 local emptyTable = {}
@@ -63,6 +70,8 @@ local noop = function()end
 --    waitTime
 --    duration=infinite, updateCallback [, drawName1, drawCallback1, ... ]
 --    duration=infinite, drawName1, drawCallback1 [, ... ]
+-- sequence can also contain these properties:
+--    onAbort = function( )
 -- Example: local cutscene = Cutscene{ 1.5,playIntro, 3.0,updateAnimPos,"anim",drawAnim, 0,finalize }
 function Cutscene:init(quickSeq)
 
@@ -74,30 +83,56 @@ function Cutscene:init(quickSeq)
 			local nextType = type(quickSeq[i+1])
 
 			-- duration, updateCallback
-			-- duration, updateCallback, drawName1, drawCallback1, ...
-			-- nil, updateCallback
+			-- duration, updateCallback [, drawName1, drawCallback1, ... ]
+			-- nil, updateCallback [, drawName1, drawCallback1, ... ]
 			-- nil, drawName1, drawCallback1, ...
 			if (nextType == 'function' or nextType == 'string') then
-				local duration, updateCb = unpack(quickSeq, i, i+1)
+
+				-- Get frame duration.
+				local duration = quickSeq[i]
+				if not (type(duration) == 'number' or duration == nil) then
+					error('expected a number or nil at index '..i..' but instead got a '..type(duration), 3)
+				end
+				i = i+1
+
+				-- Get update callback.
+				local updateCb = quickSeq[i]
 				if type(updateCb) == 'string' then
 					updateCb = nil
-					i = i+1
 				else
+					if type(updateCb) ~= 'function' then
+						error('expected a function at index '..i..' but instead got a '..type(updateCb), 3)
+					end
+					i = i+1
+				end
+
+				-- Collect drawing name and callback pairs.
+				local drawCbs = nil
+				while type(quickSeq[i]) == 'string' do
+					local drawCb = quickSeq[i+1]
+					if type(drawCb) ~= 'function' then
+						error('draw name "'..quickSeq[i]..'" was not followed by a function', 3)
+					end
+					drawCbs = (drawCbs or {})
+					drawCbs[quickSeq[i]] = drawCb
 					i = i+2
 				end
-				local drawCbs = {}
-				while (type(quickSeq[i]) == 'string') do
-					drawCbs[quickSeq[i]] = quickSeq[i+1]
-					i = i+2
-				end
+
 				self:addFrame(duration, updateCb, drawCbs)
 
+			-- zeroDurationCallback
 			-- waitTime
 			else
-				self:addFrame(quickSeq[i])
+				local v = quickSeq[i]
+				local vType = type(v)
+				if not (vType == 'function' or vType == 'number') then
+					error('expected a function or number at index '..i..' but instead got a '..vType, 3)
+				end
+				self:addFrame(v)
 				i = i+1
 			end
 		end
+		self.onAbort = quickSeq.onAbort
 	end
 
 end
@@ -106,11 +141,14 @@ end
 
 -- success = update( deltaTime )
 function Cutscene:update(dt)
+	if not dt then
+		error('missing deltaTime argument', 2)
+	end
+	if not self._isPlaying then  return false  end
+
 	local sequence = self._sequence
 	local frameData = sequence[self._currentFrame]
-	if not frameData then
-		return false
-	end
+	if not frameData then  return false  end
 
 	-- Progress cutscene.
 	local time = self._frameTime+dt
@@ -118,26 +156,30 @@ function Cutscene:update(dt)
 	-- End of frame.
 	local duration = frameData.duration
 	if time >= duration then
-		frameData.updateCallback(1, duration, duration) -- ensure the callback gets progress=1
-		self._currentFrame = self._currentFrame+1
-		time = time-duration
 
-		-- Run through zero-duration frames.
+		-- Ensure the callback gets progress=100% before we move on.
+		frameData.updateCallback(1, duration, duration)
+
+		-- Advance frame.
+		self._currentFrame = self._currentFrame+1
+		self._frameTime = time-duration
+
+		-- Run through following zero-duration frames.
 		while true do
 			frameData = sequence[self._currentFrame]
-			if (not frameData or frameData.duration > 0) then
-				break
-			end
+			if (not frameData or frameData.duration > 0) then  break  end
 			frameData.updateCallback(1, 0, 0)
+			-- If updateCallback() calls progress() then we'll end up skipping frames! Should we detect this?
+			-- A similar thing happens if restart() is called.
 			self._currentFrame = self._currentFrame+1
 		end
 
 	-- Middle of frame.
 	else
+		self._frameTime = time
 		frameData.updateCallback(time/duration, time, duration)
 
 	end
-	self._frameTime = time
 
 	return true
 end
@@ -147,9 +189,7 @@ end
 -- success = draw( name )
 function Cutscene:draw(name)
 	local frameData = self._sequence[self._currentFrame]
-	if not frameData then
-		return false
-	end
+	if not frameData then  return false  end
 	local cb = frameData.drawCallbacks[name]
 	if cb then
 		local duration = frameData.duration
@@ -183,13 +223,9 @@ end
 -- Add a frame with infinite duration and optionally have a callback before and/or after.
 -- addWaitFrame( [ beforeCallback, afterCallback ] )
 function Cutscene:addWaitFrame(beforeCb, afterCb)
-	if beforeCb then
-		self:addFrame(beforeCb)
-	end
-	self:addFrame(nil)
-	if afterCb then
-		self:addFrame(afterCb)
-	end
+	if beforeCb then  self:addFrame(beforeCb)  end
+	self:addFrame(math.huge)
+	if afterCb then  self:addFrame(afterCb)  end
 end
 
 
@@ -200,9 +236,38 @@ function Cutscene:isActive()
 	return (self._sequence[self._currentFrame] ~= nil)
 end
 
+-- state = isPlaying( )
+function Cutscene:isPlaying()
+	return (self:isActive() and self._isPlaying)
+end
+
+-- state = isPaused( )
+function Cutscene:isPaused()
+	return (self:isActive() and not self._isPlaying)
+end
+
+-- play( )
+function Cutscene:play()
+	self._isPlaying = true
+end
+
+-- pause( )
+function Cutscene:pause()
+	self._isPlaying = false
+end
+
 -- stop( )
 function Cutscene:stop()
 	self._currentFrame = #self._sequence+1 -- Just fast-forward to the end.
+end
+
+-- abort( )
+function Cutscene:abort()
+	if self:isActive() then
+		self:stop()
+		local onAbort = self.onAbort
+		if onAbort then onAbort() end
+	end
 end
 
 -- restart( )
@@ -215,13 +280,11 @@ end
 
 -- Force the cutscene to progress to the next frame (useful in frames with infinite duration).
 -- success = progress( [ keepTiming=false ] )
---   keepTiming: If true the next frame will appear without changing the timing of the remaining frames
---   success: Is false if the cutscene has already finished playing
+--   keepTiming: If true the next frame will appear without changing the timing of the remaining frames.
+--   success: Is false if the cutscene has already finished playing.
 function Cutscene:progress(keepTiming)
 	local frameData = self._sequence[self._currentFrame]
-	if not frameData then
-		return false
-	end
+	if not frameData then  return false  end
 	self._currentFrame = self._currentFrame+1
 	self._frameTime = (keepTiming and frameData.duration ~= math.huge and self._frameTime-frameData.duration or 0)
 	return true

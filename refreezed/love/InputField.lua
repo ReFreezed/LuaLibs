@@ -39,11 +39,13 @@
 	getFont, setFont
 	getScroll, setScroll
 	getSelection, setSelection, selectAll, getSelectedText
-	getText, setText
+	getText, setText, getVisibleText
+	getTextLength
 	getTextOffset, getCursorOffset, getSelectionOffset
 	getWidth, setWidth
 	insert, replace
 	isFontFilteringActive, setFontFilteringActive
+	isPasswordActive, setPasswordActive
 
 	mouseDown, mouseMove, mouseUp
 	keyDown, textInput
@@ -83,6 +85,7 @@ local InputField = newClass('InputField', {
 	_fontFilteringIsActive = false,
 	_mouseScrollX = nil,
 	_mouseTextSelectionStart = nil,
+	_passwordIsActive = false,
 	_scroll = 0,
 	_text = '',
 	_width = math.huge,
@@ -259,7 +262,8 @@ end
 
 -- limitScroll( input )
 function limitScroll(self)
-	self._scroll = math.max(math.min(self._scroll, self._font:getWidth(self._text)-self._width), 0)
+	local limit = self._font:getWidth(self:getVisibleText())-self._width
+	self._scroll = math.max(math.min(self._scroll, limit), 0)
 end
 
 
@@ -290,10 +294,10 @@ function pushHistory(self, group)
 	for i = i+1, #self._editHistory do
 		self._editHistory[i] = nil
 	end
-	state.text = self._text
+	state.text           = self._text
 	state.cursorPosition = self._cursorPosition
 	state.selectionStart = self._selectionStart
-	state.selectionEnd = self._selectionEnd
+	state.selectionEnd   = self._selectionEnd
 	self._editHistoryGroup = group
 end
 
@@ -322,10 +326,10 @@ do
 	local function applyHistoryState(self, offset)
 		self._editHistoryIndex = self._editHistoryIndex+offset
 		local state = self._editHistory[self._editHistoryIndex] or error()
-		self._text = state.text
+		self._text           = state.text
 		self._cursorPosition = state.cursorPosition
 		self._selectionStart = state.selectionStart
-		self._selectionEnd = state.selectionEnd
+		self._selectionEnd   = state.selectionEnd
 	end
 
 	-- undoEdit( input )
@@ -359,12 +363,14 @@ end
 
 -- InputField( [ initialText="" ] )
 function InputField:init(text)
-	self._text = cleanString(tostring(text == nil and '' or text))
+	text = cleanString(tostring(text == nil and '' or text))
+	local len = utf8.len(text)
+	self._text = text
 	self._editHistory = {{
-		text=self._text,
-		cursorPosition=utf8.len(self._text),
-		selectionStart=0,
-		selectionEnd=utf8.len(self._text),
+		text           = text,
+		cursorPosition = len,
+		selectionStart = 0,
+		selectionEnd   = len,
 	}}
 end
 
@@ -380,8 +386,8 @@ function InputField:update(dt)
 	if (mx) then
 		scroll = (mx < 0 and scroll+speed*mx*dt) or (mx > w and scroll+speed*(mx-w)*dt) or (scroll)
 	else
-		local text = self._text
-		local preText = text:sub(1, utf8.offset(text, self._cursorPosition+1)-1)
+		local visibleText = self:getVisibleText()
+		local preText = visibleText:sub(1, utf8.offset(visibleText, self._cursorPosition+1)-1)
 		local x = self._font:getWidth(preText)
 		scroll = clamp(scroll, x-w, x)
 	end
@@ -416,7 +422,7 @@ end
 -- setCursor( position [, selectionSideToAnchor:SelectionSide ] )
 function InputField:setCursor(pos, selSideAnchor)
 	finilizeHistoryGroup(self)
-	pos = clamp(pos, 0, utf8.len(self._text))
+	pos = clamp(pos, 0, self:getTextLength())
 	self._cursorPosition = pos
 	local selStart = (selSideAnchor == 'start' and self._selectionStart or pos)
 	local selEnd = (selSideAnchor == 'end' and self._selectionEnd or pos)
@@ -448,7 +454,7 @@ InputField:define('_font')
 
 
 -- getScroll
-InputField:define('_scroll', nil, false)
+InputField:defineGet('_scroll')
 
 -- setScroll( scroll )
 function InputField:setScroll(scroll)
@@ -466,7 +472,7 @@ end
 -- setSelection( from, to [, cursorAlign:TextCursorAlignment="right" ] )
 function InputField:setSelection(from, to, cursorAlign)
 	finilizeHistoryGroup(self)
-	local len = utf8.len(self._text)
+	local len = self:getTextLength()
 	from, to = clamp(from, 0, len), clamp(to, 0, len)
 	from, to = math.min(from, to), math.max(from, to)
 	self._selectionStart, self._selectionEnd = from, to
@@ -476,7 +482,7 @@ end
 
 -- selectAll( )
 function InputField:selectAll()
-	self:setSelection(0, utf8.len(self._text))
+	self:setSelection(0, self:getTextLength())
 end
 
 -- text = getSelectedText( )
@@ -490,7 +496,7 @@ end
 
 
 -- getText
-InputField:define('_text', nil, false)
+InputField:defineGet('_text')
 
 -- setText( text )
 function InputField:setText(text)
@@ -499,6 +505,19 @@ function InputField:setText(text)
 	self._selectionStart = 0
 	self._selectionEnd = 0
 	pushHistory(self)
+end
+
+-- text = getVisibleText( )
+function InputField:getVisibleText()
+	return (self._passwordIsActive and ('*'):rep(self:getTextLength()) or self._text)
+end
+
+
+
+-- length = getTextLength( )
+-- Length is number of characters in the UTF-8 text string.
+function InputField:getTextLength()
+	return utf8.len(self._text)
 end
 
 
@@ -510,16 +529,16 @@ end
 
 -- offset = getCursorOffset( )
 function InputField:getCursorOffset()
-	local text = self._text
-	local preText = text:sub(1, utf8.offset(text, self._cursorPosition+1)-1)
+	local visibleText = self:getVisibleText()
+	local preText = visibleText:sub(1, utf8.offset(visibleText, self._cursorPosition+1)-1)
 	return self._font:getWidth(preText)-math.floor(self._scroll)
 end
 
 -- left, right = getSelectionOffset( )
 function InputField:getSelectionOffset()
-	local font, text = self._font, self._text
-	local preText1 = text:sub(1, utf8.offset(text, self._selectionStart+1)-1)
-	local preText2 = text:sub(1, utf8.offset(text, self._selectionEnd+1)-1)
+	local font, visibleText = self._font, self:getVisibleText()
+	local preText1 = visibleText:sub(1, utf8.offset(visibleText, self._selectionStart+1)-1)
+	local preText2 = visibleText:sub(1, utf8.offset(visibleText, self._selectionEnd+1)-1)
 	local scroll = math.floor(self._scroll)
 	return font:getWidth(preText1)-scroll,
 	       font:getWidth(preText2)-scroll
@@ -584,6 +603,18 @@ end
 
 
 
+-- state = isPasswordActive( )
+function InputField:isPasswordActive()
+	return self._passwordIsActive
+end
+
+-- setPasswordActive( state )
+function InputField:setPasswordActive(state)
+	self._passwordIsActive = state
+end
+
+
+
 ----------------------------------------------------------------
 
 
@@ -593,7 +624,7 @@ function InputField:mouseDown(x, y, buttonN)
 	if (buttonN ~= 1) then
 		return false
 	end
-	local text = self._text
+	local visibleText = self:getVisibleText()
 
 	-- Check double click
 	local isDoubleClick = false
@@ -608,11 +639,11 @@ function InputField:mouseDown(x, y, buttonN)
 	end
 
 	-- Handle mouse press
-	local pos = getPositionInText(self._font, text, x+self._scroll)
-	if (isDoubleClick) then
-		pos = getNextWordBound(text, pos+1, -1)
-		self:setSelection(pos, getNextWordBound(text, pos, 1))
-	elseif (isModKeyState('s')) then
+	local pos = getPositionInText(self._font, visibleText, x+self._scroll)
+	if isDoubleClick then
+		pos = getNextWordBound(visibleText, pos+1, -1)
+		self:setSelection(pos, getNextWordBound(visibleText, pos, 1))
+	elseif isModKeyState('s') then
 		local anchorPos = (self:getAnchorSelectionSide() == 'start' and self._selectionStart or self._selectionEnd)
 		self:setSelection(pos, anchorPos, (pos < anchorPos and 'left' or 'right'))
 		self._mouseTextSelectionStart = anchorPos
@@ -630,7 +661,7 @@ function InputField:mouseMove(x, y)
 	if (not self._mouseTextSelectionStart) then
 		return false
 	end
-	local pos = getPositionInText(self._font, self._text, x+self._scroll)
+	local pos = getPositionInText(self._font, self:getVisibleText(), x+self._scroll)
 	self:setSelection(self._mouseTextSelectionStart, pos,
 		(pos < self._mouseTextSelectionStart and 'left' or 'right'))
 	self._mouseScrollX = x
@@ -667,11 +698,11 @@ function InputField:keyDown(key, scancode, isRepeat)
 		return true
 	-- Ctrl+Left: Move cursor to the previous word
 	elseif (key == 'left' and isModKeyState('c')) then
-		self:setCursor(getNextWordBound(self._text, self._cursorPosition, -1))
+		self:setCursor(getNextWordBound(self:getVisibleText(), self._cursorPosition, -1))
 		return true
 	-- Ctrl+Shift+Left: Move cursor to the previous word and preserve selection
 	elseif (key == 'left' and isModKeyState('cs')) then
-		self:setCursor(getNextWordBound(self._text, self._cursorPosition, -1), self:getAnchorSelectionSide())
+		self:setCursor(getNextWordBound(self:getVisibleText(), self._cursorPosition, -1), self:getAnchorSelectionSide())
 		return true
 
 	-- Right: Move cursor to the right
@@ -688,11 +719,11 @@ function InputField:keyDown(key, scancode, isRepeat)
 		return true
 	-- Ctrl+Right: Move cursor to the next word
 	elseif (key == 'right' and isModKeyState('c')) then
-		self:setCursor(getNextWordBound(self._text, self._cursorPosition, 1))
+		self:setCursor(getNextWordBound(self:getVisibleText(), self._cursorPosition, 1))
 		return true
 	-- Ctrl+Shift+Right: Move cursor to the next word and preserve selection
 	elseif (key == 'right' and isModKeyState('cs')) then
-		self:setCursor(getNextWordBound(self._text, self._cursorPosition, 1), self:getAnchorSelectionSide())
+		self:setCursor(getNextWordBound(self:getVisibleText(), self._cursorPosition, 1), self:getAnchorSelectionSide())
 		return true
 
 	-- Home: Move cursor to start
@@ -706,11 +737,11 @@ function InputField:keyDown(key, scancode, isRepeat)
 
 	-- End: Move cursor to end
 	elseif (key == 'end' and isModKeyState('')) then
-		self:setCursor(utf8.len(self._text))
+		self:setCursor(self:getTextLength())
 		return true
 	-- Shift+End: Move cursor to end and preserve selection
 	elseif (key == 'end' and isModKeyState('s')) then
-		self:setCursor(utf8.len(self._text), self:getAnchorSelectionSide())
+		self:setCursor(self:getTextLength(), self:getAnchorSelectionSide())
 		return true
 
 	-- Backspace: Remove selection, previous character, or previous word
@@ -718,7 +749,7 @@ function InputField:keyDown(key, scancode, isRepeat)
 		if (self._selectionStart ~= self._selectionEnd) then
 			-- void
 		elseif (isModKeyState('c')) then
-			self._cursorPosition = getNextWordBound(self._text, self._cursorPosition, -1)
+			self._cursorPosition = getNextWordBound(self:getVisibleText(), self._cursorPosition, -1)
 			self._selectionStart = self._cursorPosition
 		elseif (self._cursorPosition == 0) then
 			self:resetBlinking()
@@ -732,12 +763,12 @@ function InputField:keyDown(key, scancode, isRepeat)
 
 	-- Delete: Remove selection, next character, or next word
 	elseif (key == 'delete') then
-		if (self._selectionStart ~= self._selectionEnd) then
+		if self._selectionStart ~= self._selectionEnd then
 			-- void
-		elseif (isModKeyState('c')) then
-			self._cursorPosition = getNextWordBound(self._text, self._cursorPosition, 1)
+		elseif isModKeyState('c') then
+			self._cursorPosition = getNextWordBound(self:getVisibleText(), self._cursorPosition, 1)
 			self._selectionEnd = self._cursorPosition
-		elseif (self._cursorPosition == utf8.len(self._text)) then
+		elseif self._cursorPosition == self:getTextLength() then
 			self:resetBlinking()
 			return true
 		else

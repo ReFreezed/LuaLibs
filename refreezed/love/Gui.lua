@@ -170,7 +170,8 @@
 			input
 			- focus, blur, isFocused
 			- getField
-			- getValue, setValue
+			- getValue, setValue, getVisibleValue
+			- isPasswordActive, setPasswordActive
 			- Event: change
 			- Event: submit
 
@@ -3713,11 +3714,11 @@ end
 
 -- REPLACE _draw( )
 function Cs.text:_draw()
-	if (self._hidden) then
+	if self._hidden then
 		return
 	end
 
-	if (self._gui.debug) then
+	if self._gui.debug then
 		self:_drawDebug(255, 0, 0)
 		return
 	end
@@ -3732,20 +3733,20 @@ function Cs.text:_draw()
 	-- Layout background
 	drawBackground(self)
 
-	self._gui:_setScissor(x+1, y+1, w-2, h-2)
+	self._gui:_setScissor(x-1, y-1, w+2, h+2)
 
 	-- Text
 	local textX
-	if (self._align == 'left') then
+	if (self._align == 'left' or self._textWrapLimit) then
 		textX = self._layoutX+self.PADDING
-	elseif (self._align == 'right') then
+	elseif self._align == 'right' then
 		textX = self._layoutX+self._layoutWidth-self.PADDING-self._textWidth
 	else--if align = center
 		textX = midX-math.floor(self._textWidth/2)
 	end
 	LG.setFont(self:getFont())
 	LG.setColor(self._textColor or {255,255,255})
-	if (self._textWrapLimit) then
+	if self._textWrapLimit then
 		LG.printf(self._text, textX, textY, self._textWrapLimit, self._align)
 	else
 		LG.print(self._text, textX, textY)
@@ -4307,13 +4308,17 @@ Cs.input = Cs.widget:extend('GuiInput', {
 function Cs.input:init(gui, data, parent)
 	Cs.input.super.init(self, gui, data, parent)
 
+	-- retrieve(self, data, '_password')
 	retrieve(self, data, '_placeholder')
 
 	self._field = InputField()
 	self._field:setFont(self:getFont())
 	self._field:setFontFilteringActive(true)
-	if (data.value) then
+	if data.value then
 		self._field:setText(data.value)
+	end
+	if data.password then
+		self._field:setPasswordActive(true)
 	end
 
 end
@@ -4375,7 +4380,7 @@ function Cs.input:_draw()
 	-- Value
 	LG.setFont(self:getFont())
 	LG.setColor(255, 255, 255, 255*opacity)
-	LG.print(self._field:getText(), x+self.PADDING+self._field:getTextOffset(), textY)
+	LG.print(self._field:getVisibleText(), x+self.PADDING+self._field:getTextOffset(), textY)
 
 	-- Cursor
 	if (self:isKeyboardFocus()) then
@@ -4461,6 +4466,24 @@ end
 -- setValue( value )
 function Cs.input:setValue(value)
 	return self._field:setText(value)
+end
+
+-- value = getVisibleValue( )
+-- Will return "***" for passwords.
+function Cs.input:getVisibleValue()
+	return self._field:getVisibleText()
+end
+
+
+
+-- state = isPasswordActive( )
+function Cs.input:isPasswordActive()
+	return self._field:isPasswordActive()
+end
+
+-- setPasswordActive( state )
+function Cs.input:setPasswordActive(state)
+	self._field:setPasswordActive(state)
 end
 
 

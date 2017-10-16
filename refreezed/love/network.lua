@@ -349,12 +349,17 @@ function network.update()
 
 	-- Handle events.
 	while true do
-		local e = nil
-		if not (network._isClient and not network._serverPeer) then
-			-- As a client we must be connected or else service() will throw an error!
-			e = network._host:service()
-		end
-		if not e then
+		local host = network._host
+		local ok, e = pcall(host.service, host)
+		if not ok then
+			if e == 'Error during service' then
+				-- We get this error e.g. if the host name is "0.0.0.0" or just "0".
+				network.disconnectFromServer()
+			else
+				log('important', 'ERROR: network: %s', e)
+			end
+			break
+		elseif not e then
 			break
 		end
 		local eType, peer = e.type, e.peer
@@ -439,7 +444,6 @@ function network.update()
 			end
 
 		end
-		-- void
 	end
 
 end
@@ -689,7 +693,12 @@ function network.connectToServer()
 		return false, 'port has not been set'
 	end
 
-	network._serverPeer = assert(network._host:connect(network._serverIp..':'..network._port))
+	local host = network._host
+	local ok, peer = pcall(host.connect, host, network._serverIp:gsub(':.*$', '')..':'..network._port)
+	if not ok then
+		return false, peer -- Server IP is probably malformed.
+	end
+	network._serverPeer = peer
 	network._isTryingToConnectToServer = true
 
 	log('state', 'Connecting to server (%s)...', network._serverPeer)

@@ -104,7 +104,7 @@
 	- Event: beforedraw, afterdraw
 	- Event: close
 	- Event: keydown
-	- Event: mousedown
+	- Event: mousedown, mousemove, mouseup
 	- Event: refresh
 	- Event: show, hide
 	- Event: update
@@ -1048,6 +1048,12 @@ do
 
 		updateLayoutIfNeeded(self)
 
+		if nav:trigger('navigate', targetAng) then
+			return self._navigationTarget -- Suppress default behavior.
+		end
+
+		updateLayoutIfNeeded(self)
+
 		local navX, navY = nav:getLayoutCenterPosition()
 		navX = navX+nav._layoutOffsetX+0.99*nav._layoutWidth/2*math.cos(targetAng)
 		navY = navY+nav._layoutOffsetY+0.99*nav._layoutHeight/2*math.sin(targetAng)
@@ -1280,68 +1286,93 @@ end
 -- handled = mouseDown( x, y, button )
 function Gui:mouseDown(x, y, buttonN)
 	self._mouseX, self._mouseY = x, y
-	if (self._mouseFocusSet[buttonN]) then
-		return true -- (should be an error, but it's not really an issue)
+
+	if self._mouseFocusSet[buttonN] then
+		return true -- Should be an error, but it's not really an issue.
 	end
+
 	local focus = self._mouseFocus
-	if (focus) then
+	if focus then
 		self._mouseFocusSet[buttonN] = true
 	end
-	updateLayoutIfNeeded(self) -- (updates hovered element)
+
+	updateLayoutIfNeeded(self) -- Updates hovered element.
+
 	local el = (focus or self._hoveredElement)
-	if (el) then
-		if (not focus and el:trigger('mousedown',
+	if el then
+		if el:trigger('mousedown',
 			x-el._layoutX-el._layoutOffsetX,
 			y-el._layoutY-el._layoutOffsetY,
-			buttonN))
+			buttonN)
 		then
 			return true -- (suppress default behavior)
 		end
 		local handled, grabFocus = el:_mouseDown(x, y, buttonN)
 		handled = (handled or el._captureInput or el._captureGuiInput or el:isSolid())
-		if (handled) then
+		if handled then
 			if (grabFocus and not next(self._mouseFocusSet)) then
 				setMouseFocus(self, el, buttonN)
 			end
 			return true
 		end
 	end
+
 	return (focus ~= nil)
 end
 
 -- handled = mouseMove( x, y )
 function Gui:mouseMove(x, y)
 	self._mouseX, self._mouseY = x, y
-	if (not updateLayoutIfNeeded(self)) then
-		updateHoveredElement(self) -- make sure hovered element updates whenever mouse moves
+
+	if not updateLayoutIfNeeded(self) then
+		updateHoveredElement(self) -- Make sure hovered element updates whenever mouse moves.
 	end
+
 	local focus = self._mouseFocus
 	if (not focus) then
 		return false
 	end
+
 	local el = (focus or self._hoveredElement)
-	if (el) then
+	if el then
 		el:_mouseMove(x, y)
+		el:trigger('mousemove',
+			x-el._layoutX-el._layoutOffsetX,
+			y-el._layoutY-el._layoutOffsetY)
 	end
+
 	return true
 end
 
 -- handled = mouseUp( x, y, button )
 function Gui:mouseUp(x, y, buttonN)
 	self._mouseX, self._mouseY = x, y
+
 	local focus = self._mouseFocus
 	if not (focus and self._mouseFocusSet[buttonN]) then
 		return false
 	end
+
 	self._mouseFocusSet[buttonN] = nil
+
 	updateLayoutIfNeeded(self) -- (updates hovered element)
+
 	local el = (focus or self._hoveredElement)
-	if (el) then
+	if el then
 		el:_mouseUp(x, y, buttonN)
 	end
-	if (not next(self._mouseFocusSet)) then
+
+	if not next(self._mouseFocusSet) then
 		setMouseFocus(self, nil)
 	end
+
+	if el then
+		el:trigger('mouseup',
+			x-el._layoutX-el._layoutOffsetX,
+			y-el._layoutY-el._layoutOffsetY,
+			buttonN)
+	end
+
 	return true
 end
 
@@ -2377,55 +2408,79 @@ end
 
 
 -- menuElement = showMenu( items, [ highlightedIndex, ] [ offsetX=0, offsetY=0, ] callback )
+-- items = { itemText... }
+-- items = { { itemText, itemExtraText }... }
+-- callback = function( index, itemText )
+--    index will be 0 if no item was chosen.
 function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
+	assertArg(1, items, 'table')
 
-	-- items, highlightedIndex, offsetX, offsetY, callback
+	-- showMenu( items, highlightedIndex, offsetX, offsetY, callback )
 	if (type(highlightI) == 'number' and type(offsetX) == 'number' and type(offsetY) == 'number') then
 		-- void
 
-	-- items, offsetX, offsetY, callback
+	-- showMenu( items, offsetX, offsetY, callback )
 	elseif (type(highlightI) == 'number' and type(offsetX) == 'number') then
 		highlightI, offsetX, offsetY, cb = nil, highlightI, offsetX, offsetY
 
-	-- items, highlightedIndex, callback
+	-- showMenu( items, highlightedIndex, callback )
 	elseif (type(highlightI) == 'number') then
 		offsetX, offsetY, cb = 0, 0, offsetX
 
-	-- items, callback
+	-- showMenu( items, callback )
 	else
 		highlightI, offsetX, offsetY, cb = nil, 0, 0, highlightI
+
+	end
+	if type(cb) ~= 'function' then
+		error('Missing callback argument.', 2)
 	end
 
+	local gui = self._gui
 	local root = self:getRoot()
 	local p = self.MENU_PADDING
 
-	updateLayoutIfNeeded(self._gui) -- (so we get the correct self position here below)
+	updateLayoutIfNeeded(gui) -- So we get the correct self position here below.
 
-	-- Create menu
+	-- Create menu.
 	local menu = root:insert{
-		type='container', expandX=true, expandY=true, background='cover', closable=true, captureInput=true,
-		{type='vbar', background='shadow', padding=p},
+		type='container', expandX=true, expandY=true, background='cover', closable=true, captureGuiInput=true,
+		[1] = {type='vbar', id='_buttons', background='shadow', padding=p, maxHeight=root:getHeight()},
 	}
-	local buttons = menu[1]
-	menu:setCallback('close', function(button, event)
-		cb(nil)
+	menu:setCallback('closed', function(button, event)
+		if cb then
+			cb(0, '')
+			cb = nil
+		end
 	end)
 	menu:setCallback('mousedown', function(button, event, x, y, buttonN)
-		cb(nil)
-		menu:remove()
+		menu:close()
 	end)
 
-	-- Add menu items
-	for i, item in ipairs(items) do
-		local button = buttons:insert{ type='button', text=item, align='left', toggled=(i == highlightI) }
+	-- Add menu items.
+	local buttons = menu:find('_buttons')
+	for i, text in ipairs(items) do
+		local text2 = nil
+		if type(text) == 'table' then
+			text, text2 = unpack(text)
+		end
+		local isToggled = (i == highlightI)
+		local button = buttons:insert{ type='button', text=text, text2=text2, align='left', toggled=isToggled }
 		button:setCallback('press', function(button, event)
-			cb(i, item)
 			menu:remove()
+			if cb then
+				cb(i, text)
+				cb = nil
+			end
 		end)
+		if isToggled then
+			gui:navigateTo(button)
+		end
 	end
 
-	-- Set position
-	buttons:_updateLayoutSize() -- (expanding and positioning of the whole menu isn't necessary right here)
+	-- Set position.
+	-- @Incomplete: Make the menu (at least) as wide as self.
+	buttons:_updateLayoutSize() -- Expanding and positioning of the whole menu isn't necessary right here.
 	buttons:setPosition(
 		self._layoutX+self._layoutOffsetX+offsetX-p,
 		math.max(math.min(self._layoutY+self._layoutOffsetY+offsetY-p, root._height-buttons._layoutHeight), 0)
@@ -3726,14 +3781,14 @@ function Cs.text:_draw()
 	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
 	local w, h = self._layoutWidth, self._layoutHeight
 	local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
-	local textY = midY-math.floor(self._textHeight/2)
+	local textY = math.floor(midY-self._textHeight/2)
 
 	self:trigger('beforedraw', x, y, w, h)
 
 	-- Layout background
 	drawBackground(self)
 
-	self._gui:_setScissor(x-1, y-1, w+2, h+2)
+	self._gui:_setScissor(x+1, y+1, w-2, h-2)
 
 	-- Text
 	local textX

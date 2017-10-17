@@ -13,6 +13,7 @@
 
 	check, checkNumber
 	getNumber, getState
+	getNumbers, getStates
 	has, hasNumber
 	states, numbers
 
@@ -63,9 +64,9 @@ function Enum:init(name, t)
 		insert(numberValues, n)
 	end
 	table.sort(numberValues)
-	table.sort(stateValues, function(a, b)
-		return (tostring(a) < tostring(b))
-	end)
+	-- table.sort(stateValues, function(a, b)
+	-- 	return (tostring(a) < tostring(b))
+	-- end)
 	self._numbers, self._numberValues = numbers, numberValues
 	self._states,  self._stateValues  = states,  stateValues
 	self._name = name
@@ -95,6 +96,15 @@ end
 -- state = getState( number )
 function Enum:getState(n)
 	return self._states[n]
+end
+
+-- numbers = getNumbers( )
+function Enum:getNumbers()
+	return {unpack(self._numbers)}
+end
+-- states = getStates( )
+function Enum:getStates()
+	return {unpack(self._states)}
 end
 
 -- result = has( state )

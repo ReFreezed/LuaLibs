@@ -5,9 +5,9 @@
 --=  Dependencies:
 --=  - LÖVE 0.10.2
 --=  - refreezed.class
---=  - refreezed.love.Animation (unavailable in LuaLibs!)
+--=  - refreezed.love.Animation (Used by Sprites.)
 --=  - refreezed.love.InputField
---=  - refreezed.love.Sprite (unavailable in LuaLibs!)
+--=  - refreezed.love.Sprite (Unavailable in LuaLibs! TODO!!!)
 --=
 --=-------------------------------------------------------------
 --=

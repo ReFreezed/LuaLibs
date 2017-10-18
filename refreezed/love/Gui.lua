@@ -180,8 +180,8 @@
 
 
 -- Modules
-local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- (parent folder)
-local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- (same folder)
+local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- In parent folder.
+local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- In same folder.
 local LG = love.graphics
 
 local DEFAULT_FONT = LG.newFont(12)
@@ -201,8 +201,8 @@ local Gui = newClass('Gui', {
 	_lockNavigation = false,
 	_mouseFocus = nil, _mouseFocusSet = nil,
 	_mouseIsGrabbed = false,
-	_mouseOffsetX = 0, _mouseOffsetY = 0, -- (not used at the moment)
-	_mouseX = -99999, _mouseY = -99999,
+	_mouseOffsetX = 0, _mouseOffsetY = 0, -- (Not used at the moment.)
+	_mouseX = nil, _mouseY = nil,
 	_navigationTarget = nil, _timeSinceNavigation = 0.0,
 	_root = nil,
 	_scissorCoordsConverter = nil,
@@ -216,15 +216,15 @@ local Gui = newClass('Gui', {
 
 })
 
-local Cs = {} -- gui element Classes
+local Cs = {} -- gui element Classes.
 
 local validSoundKeys = {
 
 	-- Generic
-	['close'] = true, -- usually containers
-	['focus'] = true, -- (only used by inputs so far)
-	['press'] = true, -- buttons
-	['scroll'] = true, -- containers
+	['close'] = true, -- Usually containers.
+	['focus'] = true, -- Only used by Inputs so far.
+	['press'] = true, -- Buttons.
+	['scroll'] = true, -- Containers.
 
 	-- Element specific
 	['inputsubmit'] = true, ['inputrevert'] = true,
@@ -537,7 +537,7 @@ end
 
 -- updateHoveredElement( gui )
 function updateHoveredElement(gui)
-	local el = gui:getElementAt(gui._mouseX, gui._mouseY)
+	local el = (gui._mouseX and gui:getElementAt(gui._mouseX, gui._mouseY))
 	if gui._hoveredElement == el then
 		return
 	end
@@ -565,12 +565,12 @@ function updateLayout(el)
 	if gui.debug then
 		print('Gui: Updating layout')
 	end
-	local container = el:getRoot() -- TODO: Make any element able to update it's layout [LOW]
+	local container = el:getRoot() -- @Incomplete: Make any element able to update it's layout.
 	if container._hidden then
 		return false
 	end
 	container:_updateLayoutSize()
-	container:_expandLayout(nil, nil) -- (most likely only works correctly if container is root right now)
+	container:_expandLayout(nil, nil) -- (Currently, most likely only works correctly if 'container' is the root.)
 	container:_updateLayoutPosition()
 	gui._layoutNeedsUpdate = false
 	for innerEl in container:traverseVisible() do
@@ -738,8 +738,8 @@ function Gui:update(dt)
 	end
 
 	-- Check if mouse is inside window
-	if (not love.window.hasMouseFocus() and not (self._mouseX == -99999 and self._mouseY == -99999)) then
-		self:mouseMove(-99999, -99999)
+	if (self._mouseX and not love.window.hasMouseFocus()) then
+		self:mouseMove(nil, nil)
 	end
 
 	-- Update mouse cursor
@@ -805,7 +805,7 @@ function Gui:blur()
 	end
 	setMouseFocus(self, nil)
 	self._hoveredElement = nil
-	self._mouseX, self._mouseY = -99999, -99999
+	self._mouseX, self._mouseY = nil, nil
 end
 
 
@@ -1068,7 +1068,7 @@ do
 				local dx, dy = x-navX, y-navY
 				local distSquared = dx*dx+dy*dy
 				local angDiff = math.atan2(dy, dx)-targetAng
-				angDiff = math.abs(math.atan2(math.sin(angDiff), math.cos(angDiff))) -- (normalize)
+				angDiff = math.abs(math.atan2(math.sin(angDiff), math.cos(angDiff))) -- Normalize.
 				if (angDiff < MAX_ANGLE_DIFF and distSquared <= closestDistSquared) then
 					closestEl, closestDistSquared, closestAngDiff = el, distSquared, angDiff
 				end
@@ -1305,7 +1305,7 @@ function Gui:mouseDown(x, y, buttonN)
 			y-el._layoutY-el._layoutOffsetY,
 			buttonN)
 		then
-			return true -- (suppress default behavior)
+			return true -- Suppress default behavior.
 		end
 		local handled, grabFocus = el:_mouseDown(x, y, buttonN)
 		handled = (handled or el._captureInput or el._captureGuiInput or el:isSolid())
@@ -1333,7 +1333,7 @@ function Gui:mouseMove(x, y)
 		return false
 	end
 
-	local el = (focus or self._hoveredElement)
+	local el = (x and focus or self._hoveredElement)
 	if el then
 		el:_mouseMove(x, y)
 		el:trigger('mousemove',
@@ -1355,7 +1355,7 @@ function Gui:mouseUp(x, y, buttonN)
 
 	self._mouseFocusSet[buttonN] = nil
 
-	updateLayoutIfNeeded(self) -- (updates hovered element)
+	updateLayoutIfNeeded(self) -- Updates hovered element.
 
 	local el = (focus or self._hoveredElement)
 	if el then
@@ -1386,7 +1386,7 @@ function Gui:mouseWheel(dx, dy)
 	end
 
 	-- Hovered element (bubbling event)
-	updateLayoutIfNeeded(self) -- (updates hovered element)
+	updateLayoutIfNeeded(self) -- Updates hovered element.
 	local el, anyIsSolid = self._hoveredElement, false
 	while el do
 		if el:_mouseWheel(dx, dy) then
@@ -1403,7 +1403,7 @@ end
 
 -- _setScissor( x, y, width, height )
 -- NOTE: Must be called twice - first with arguments, then without
--- TODO: Make Gui._setScissor local
+-- @Encapsulation: Make Gui._setScissor local.
 function Gui:_setScissor(x, y, w, h)
 	if not x then
 		LG.pop()
@@ -1654,7 +1654,7 @@ function Cs.element:close()
 	end
 	local preparedSound = prepareSound(self, 'close')
 	if self:trigger('close') then
-		return false -- (suppress default behavior)
+		return false -- Suppress default behavior.
 	end
 	preparedSound()
 	self:hide()
@@ -2298,7 +2298,7 @@ end
 -- state = isHovered( [ checkFocus=false ] )
 function Cs.element:isHovered(checkFocus)
 	local gui = self._gui
-	updateLayoutIfNeeded(gui) -- (updates hovered element)
+	updateLayoutIfNeeded(gui) -- Updates hovered element.
 	return (self == gui._hoveredElement) and not (checkFocus and self ~= (gui._mouseFocus or self))
 end
 
@@ -2739,7 +2739,7 @@ function Cs.container:setScroll(scrollX, scrollY)
 	end
 
 	if self:isDisplayed() then
-		playSound(self, 'scroll') -- (may have to add more limitations to whether "scroll" sound plays or not)
+		playSound(self, 'scroll') -- @Robustness: May have to add more limitations to whether "scroll" sound plays or not.
 		updateHoveredElement(self._gui)
 	end
 end
@@ -2750,7 +2750,7 @@ function Cs.container:scroll(dx, dy)
 end
 
 -- updateScroll( )
--- TODO: Update scroll automatically when elements change size etc.
+-- @Incomplete: Update scroll automatically when elements change size etc.
 function Cs.container:updateScroll()
 	self:scroll(0, 0)
 end
@@ -3103,7 +3103,7 @@ end
 function Cs.container:_updateLayoutPosition()
 	for _, child in ipairs(self) do
 		if not child._hidden then
-			updateFloatingElementPosition(child) -- (all children counts as floating in plain containers)
+			updateFloatingElementPosition(child) -- All children counts as floating in plain containers.
 		end
 	end
 end
@@ -3709,7 +3709,7 @@ function Cs.image:setSprite(sprite)
 	else
 		self._sprite = nil
 	end
-	-- TODO: Only update layout if image sprite size is different (Also, restrict access to the sprite)
+	-- @Incomplete: Only update layout if the GuiImage's sprite size is different. (Also, restrict access to the sprite.)
 	scheduleLayoutUpdateIfDisplayed(self)
 	return sprite
 end
@@ -3875,7 +3875,7 @@ end
 Cs.button = Cs.widget:extend('GuiButton', {
 
 	--[[OVERRIDE]] PADDING = 3,
-	ARROW = nil, -- (is set here below)
+	ARROW = nil, -- Is set here below.
 	ARROW_LENGTH = 2,
 	IMAGE_SPACING = 3, TEXT_SPACING = 6,
 	THEMES = {['normal']=true, ['highlight']=true, ['negative']=true, ['blend']=true},
@@ -3982,7 +3982,7 @@ function Cs.button:_draw()
 	local isHovered = (self._active and self:isHovered(true))
 	local isBlended = not (self:isMouseFocus() or self:isHovered())
 	-- Background
-	local r, g, b, a = 130, 210, 230, 200 -- (normal theme)
+	local r, g, b, a = 130, 210, 230, 200 -- Normal theme.
 	if self._toggled then
 		b = b*0.2
 	elseif self._theme == 'normal' then
@@ -4030,7 +4030,7 @@ function Cs.button:_draw()
 	self._gui:_setScissor(x+2, y+2, w-2*2, h-2*2)
 
 	-- Image
-	-- TODO: Support 'align' for no-text image buttons
+	-- @Incomplete: Support 'align' for no-text image buttons.
 	if (self._sprite and self._text == '' and self._text2 == '') then
 		local iw, ih = self._sprite:getScaledDimensions()
 		if self._imageBackgroundColor then
@@ -4133,7 +4133,7 @@ function Cs.button:setSprite(sprite)
 	else
 		self._sprite = nil
 	end
-	-- TODO: Only update layout if button sprite size is different (Also, restrict access to the sprite)
+	-- @Incomplete: Only update layout if GuiButton's sprite size is different. (Also, restrict access to the sprite.)
 	scheduleLayoutUpdateIfDisplayed(self)
 	return sprite
 end

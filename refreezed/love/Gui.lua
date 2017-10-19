@@ -56,6 +56,7 @@
 	getSoundPlayer, setSoundPlayer
 	getSpriteLoader, setSpriteLoader
 	getTarget, getTargetCallback, setTargetCallback
+	getTheme, setTheme
 	isBusy, isMouseBusy
 	isIgnoringKeyboardInput
 	isMouseGrabbed, setMouseIsGrabbed
@@ -88,6 +89,7 @@
 	- getRoot
 	- getSound, getResultingSound, setSound
 	- getTooltip, setTooltip
+	- hasTag, addTag, removeTag, removeAllTags, setTag
 	- isAt
 	- isDisplayed, getClosestHiddenElement, getFarthestHiddenElement
 	- isHidden, isVisible, setHidden, setVisible, show, hide, toggleHidden
@@ -99,6 +101,7 @@
 	- refresh
 	- remove
 	- scrollIntoView
+	- setScissor
 	- showMenu
 	- updateLayout
 	- Event: beforedraw, afterdraw
@@ -138,6 +141,7 @@
 	(leaf)
 	- getAlign, setAlign
 	- getFont
+	- getMnemonicPosition
 	- getText, setText
 	- getTextColor, setTextColor
 	- isBold, setBold
@@ -149,8 +153,10 @@
 
 		image
 		- getImageBackgroundColor, setImageBackgroundColor
-		- getSprite, setSprite
-		- getSpriteColor, setSpriteColor
+		- getImageColor, setImageColor
+		- getImageDimensions
+		- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
+		- setSprite
 
 		text
 
@@ -158,13 +164,15 @@
 		- isActive, setActive
 
 			button
+			- getArrow
 			- getImageBackgroundColor, setImageBackgroundColor
-			- getSprite, setSprite
-			- getSpriteColor, setSpriteColor
+			- getImageColor, setImageColor
+			- getImageDimensions
+			- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
 			- getText2, setText2
-			- getTheme, setTheme
 			- isToggled, setToggled
-			- press
+			- press, isPressed
+			- setSprite
 			- Event: press
 
 			input
@@ -184,6 +192,7 @@ local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.cl
 local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- In same folder.
 local LG = love.graphics
 
+local COLOR_WHITE = {255,255,255,255}
 local DEFAULT_FONT = LG.newFont(12)
 local TAU = 2*math.pi
 
@@ -192,6 +201,7 @@ local Gui = newClass('Gui', {
 	TOOLTIP_DELAY = 0.15,
 
 	_defaultSounds = {},
+	_elementScissorIsSet = false,
 	_font = DEFAULT_FONT, _boldFont = DEFAULT_FONT, _smallFont = DEFAULT_FONT,
 	_hoveredElement = nil,
 	_ignoreKeyboardInputThisFrame = false,
@@ -210,12 +220,14 @@ local Gui = newClass('Gui', {
 	_spriteLoader = nil,
 	_styles = nil,
 	_time = 0.0,
+	_theme = nil,
 	_tooltipTime = 0.0,
 
 	debug = false,
 
 })
 
+local defaultTheme -- Defined at the bottom of the file.
 local Cs = {} -- gui element Classes.
 
 local validSoundKeys = {
@@ -241,7 +253,7 @@ local applyStyle
 local checkValidSoundKey
 local copyTable
 local coroutineIterator, newIteratorCoroutine
-local drawBackground
+local drawLayoutBackground
 local errorf, assertArg
 local F
 local getTextDimensions, getTextHeight
@@ -252,8 +264,11 @@ local retrieve
 local reverseArray
 local round
 local setMouseFocus, setKeyboardFocus
+local setScissor
+local themeCallBack, themeRender, themeGetSize
 local updateHoveredElement, validateNavigationTarget
 local updateLayout, updateLayoutIfNeeded, scheduleLayoutUpdateIfDisplayed
+local xywh
 
 local updateContainerChildLayoutSizes
 local getContainerLayoutSizeValues
@@ -328,27 +343,33 @@ end
 
 
 
--- drawBackground( element )
-function drawBackground(el)
+-- drawLayoutBackground( element )
+function drawLayoutBackground(el)
 	local bg = el._background
-	if not bg then
-		return
-	end
+	if not bg then  return  end
+
 	local x, y = el._layoutX+el._layoutOffsetX, el._layoutY+el._layoutOffsetY
 	local w, h = el._layoutWidth, el._layoutHeight
-	if nil then
-	elseif bg == 'shadow' then
+
+	if bg == 'shadow' then
 		LG.setColor(0, 0, 0, 150)
 		LG.rectangle('fill', x, y, w, h)
+
 	elseif bg == 'header' then
 		LG.setColor(255, 255, 255, 50)
 		LG.rectangle('fill', x, y, w, h)
+
 	elseif bg == 'cover' then
 		LG.setColor(40, 40, 40, 240)
 		LG.rectangle('fill', x, y, w, h)
+
 	elseif bg == 'warning' then
 		LG.setColor(188, 58, 41, 180)
 		LG.rectangle('fill', x, y, w, h)
+
+	else
+		errorf('Bad layout background name %q.', bg)
+
 	end
 end
 
@@ -535,6 +556,64 @@ end
 
 
 
+-- setScissor( gui, x, y, width, height ) -- Push scissor.
+-- setScissor( gui, nil ) -- Pop scissor.
+-- Must be called twice - first with arguments, then without!
+function setScissor(gui, x, y, w, h)
+
+	if not x then
+		LG.pop()
+		return
+	end
+
+	local convert = gui._scissorCoordsConverter
+	if convert then
+		x, y, w, h = convert(x, y, w, h)
+	end
+
+	LG.push('all')
+	LG.intersectScissor(x, y, w, h)
+
+end
+
+
+
+-- value... = themeCallBack( gui, sectionKey, what, argument... )
+function themeCallBack(gui, k, what, ...)
+	local theme = gui._theme
+	local section = (theme and theme[k])
+	local cb = (section and section[what] or defaultTheme[k][what])
+		or errorf(2, 'Missing default theme callback for "%s.%s".', k, what)
+	return cb(...)
+end
+
+-- themeRender( element, what, extraArgument... )
+function themeRender(el, what, ...)
+	local gui = el._gui
+
+	LG.push('all')
+	LG.translate(el._layoutX+el._layoutOffsetX, el._layoutY+el._layoutOffsetY)
+
+	themeCallBack(gui, 'draw', what, el, el._layoutWidth, el._layoutHeight, ...)
+	if gui._elementScissorIsSet then
+		setScissor(gui, nil)
+		gui._elementScissorIsSet = false
+	end
+
+	LG.pop()
+end
+
+-- width, height = themeGetSize( element, what, extraArgument... )
+function themeGetSize(el, what, ...)
+	local w, h = themeCallBack(el._gui, 'size', what, el, ...)
+	if not (type(w) == 'number' and type(h) == 'number') then
+		errorf(2, 'Theme (or default theme) did not return width and height for %q, instead we got: %s, %s', what, w, h)
+	end
+	return w, h
+end
+
+
+
 -- updateHoveredElement( gui )
 function updateHoveredElement(gui)
 	local el = (gui._mouseX and gui:getElementAt(gui._mouseX, gui._mouseY))
@@ -603,6 +682,17 @@ function scheduleLayoutUpdateIfDisplayed(el)
 	if (gui.debug and gui._layoutNeedsUpdate) then
 		print('Gui: Scheduling layout update')
 	end
+end
+
+
+
+-- x, y, width, height = xywh( element )
+function xywh(el)
+	return
+		el._layoutX+el._layoutOffsetX,
+		el._layoutY+el._layoutOffsetY,
+		el._layoutWidth,
+		el._layoutHeight
 end
 
 
@@ -770,16 +860,7 @@ function Gui:draw()
 
 		-- Navigation target
 		local nav = self._navigationTarget
-		if nav then
-			local offset = 3*math.max(1-self._timeSinceNavigation/0.1, 0)
-			local x, y = nav._layoutX+nav._layoutOffsetX-offset, nav._layoutY+nav._layoutOffsetY-offset
-			local w, h = nav._layoutWidth+2*offset, nav._layoutHeight+2*offset
-			local v = (math.cos(0.4*self._timeSinceNavigation*TAU)+1)/2
-			LG.setColor(255, 255, 0, lerp(15, 40, v))
-			LG.rectangle('fill', x, y, w, h)
-			LG.setColor(255, 255, 0, lerp(140, 255, v))
-			LG.rectangle('line', x+0.5, y+0.5, w-1, h-1)
-		end
+		if nav then  themeRender(nav, 'navigation', self._timeSinceNavigation)  end
 
 		-- Tooltip
 		local el = self._hoveredElement
@@ -1181,6 +1262,17 @@ end
 
 
 
+-- getTheme
+Gui:defineGet'_theme'
+
+-- setTheme( theme )
+function Gui:setTheme(theme)
+	assertArg(1, theme, 'table','nil')
+	self._theme = theme
+end
+
+
+
 -- state = isBusy( )
 function Gui:isBusy()
 	return (self._keyboardFocus ~= nil or self:isMouseBusy())
@@ -1401,24 +1493,6 @@ end
 
 
 
--- _setScissor( x, y, width, height )
--- NOTE: Must be called twice - first with arguments, then without
--- @Encapsulation: Make Gui._setScissor local.
-function Gui:_setScissor(x, y, w, h)
-	if not x then
-		LG.pop()
-		return
-	end
-	local convert = self._scissorCoordsConverter
-	if convert then
-		x, y, w, h = convert(x, y, w, h)
-	end
-	LG.push('all')
-	LG.intersectScissor(x, y, w, h)
-end
-
-
-
 -- handled = ok( )
 function Gui:ok()
 	local nav = self._navigationTarget
@@ -1494,6 +1568,7 @@ Cs.element = newClass('GuiElement', {
 	_marginTop = nil, _marginRight = nil, _marginBottom = nil, _marginLeft = nil,
 	_originX = 0.0, _originY = 0.0, -- where in the parent to base x and y off
 	_sounds = nil,
+	_tags = nil,
 	_tooltip = '',
 	_width = nil, _height = nil,
 	_x = 0, _y = 0, -- offset from origin
@@ -1526,6 +1601,7 @@ function Cs.element:init(gui, data, parent)
 	retrieve(self, data, '_marginTop', '_marginRight', '_marginBottom', '_marginLeft')
 	retrieve(self, data, '_originX', '_originY')
 	-- retrieve(self, data, '_sounds')
+	-- retrieve(self, data, '_tags')
 	retrieve(self, data, '_tooltip')
 	retrieve(self, data, '_width', '_height')
 	retrieve(self, data, '_x', '_y')
@@ -1542,6 +1618,15 @@ function Cs.element:init(gui, data, parent)
 		for soundK, sound in pairs(data.sounds) do
 			checkValidSoundKey(soundK)
 			self._sounds[soundK] = sound
+		end
+	end
+
+	-- Add tags
+	self._tags = {}
+	if data.tags ~= nil then
+		assert(type(data.tags) == 'table')
+		for _, tag in ipairs(data.tags) do
+			self._tags[tag] = true
 		end
 	end
 
@@ -1575,10 +1660,9 @@ end
 
 -- _draw( )
 function Cs.element:_draw()
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
-	drawBackground(self)
+	drawLayoutBackground(self)
 	self:trigger('afterdraw', x, y, w, h)
 end
 
@@ -1591,13 +1675,13 @@ function Cs.element:_drawDebug(r, g, b, bgOpacity)
 	local w, h = self._layoutWidth, self._layoutHeight
 	local x1, y1 = self._layoutX, self._layoutY
 	local x2, y2 = x1+w, y1+h
-	local p = (self:is(Cs.container) and self._padding or 0)
-	local lw = math.max(p, 1)
+	local padding = (self:is(Cs.container) and self._padding or 0)
+	local lw = math.max(padding, 1)
 
 	-- Background and center line
 	LG.setColor(r, g, b, 80*(bgOpacity or 1))
 	LG.rectangle('fill', x1, y1, w, h)
-	LG.line(x1+p, y1+p, x1+w/2, y1+h/2)
+	LG.line(x1+padding, y1+padding, x1+w/2, y1+h/2)
 
 	-- Border
 	LG.setLineWidth(lw)
@@ -1622,10 +1706,10 @@ function Cs.element:_drawTooltip()
 	if (text == '' or gui._tooltipTime < gui.TOOLTIP_DELAY) then
 		return
 	end
-	local p = 3 -- padding
+	local padding = 3
 	local root, font = gui._root, gui._font
 	local w, h = getTextDimensions(font, text)
-	w, h = w+2*p, h+2*p
+	w, h = w+2*padding, h+2*padding
 	local x = math.max(math.min(self._layoutX, root._width-w), 0)
 	local y = self._layoutY+self._layoutHeight
 	if y+h > root._height then
@@ -1641,7 +1725,7 @@ function Cs.element:_drawTooltip()
 	-- Text
 	LG.setFont(font)
 	LG.setColor(0, 0, 0)
-	LG.print(text, x+p, y+p)
+	LG.print(text, x+padding, y+padding)
 
 end
 
@@ -2155,6 +2239,37 @@ Cs.element:define('_tooltip')
 
 
 
+-- state = hasTag( tag )
+function Cs.element:hasTag(tag)
+	return (self._tags[tag] ~= nil)
+end
+
+-- addTag( tag )
+function Cs.element:addTag(tag)
+	self._tags[tag] = true
+end
+
+-- removeTag( tag )
+function Cs.element:removeTag(tag)
+	self._tags[tag] = nil
+end
+
+-- removeAllTags( )
+function Cs.element:removeAllTags()
+	self._tags = {}
+end
+
+-- setTag( tag, state )
+function Cs.element:setTag(tag, state)
+	if state then
+		self:addTag(tag)
+	else
+		self:removeTag(tag)
+	end
+end
+
+
+
 -- result = isAt( x, y )
 function Cs.element:isAt(x, y)
 	updateLayoutIfNeeded(self._gui)
@@ -2295,11 +2410,11 @@ end
 
 
 
--- state = isHovered( [ checkFocus=false ] )
-function Cs.element:isHovered(checkFocus)
+-- state = isHovered( [ checkMouseFocus=false ] )
+function Cs.element:isHovered(checkMouseFocus)
 	local gui = self._gui
 	updateLayoutIfNeeded(gui) -- Updates hovered element.
-	return (self == gui._hoveredElement) and not (checkFocus and self ~= (gui._mouseFocus or self))
+	return (self == gui._hoveredElement) and not (checkMouseFocus and self ~= (gui._mouseFocus or self))
 end
 
 
@@ -2407,6 +2522,25 @@ end
 
 
 
+-- Helper function for theme drawing functions.
+-- setScissor( relativeX, relativeY, width, height )
+function Cs.element:setScissor(x, y, w, h)
+	local gui = self._gui
+
+	if gui._elementScissorIsSet then
+		setScissor(gui, nil)
+	end
+
+	x = x+self._layoutX+self._layoutOffsetX
+	y = y+self._layoutY+self._layoutOffsetY
+
+	setScissor(gui, x, y, w, h)
+	gui._elementScissorIsSet = true
+
+end
+
+
+
 -- menuElement = showMenu( items, [ highlightedIndex, ] [ offsetX=0, offsetY=0, ] callback )
 -- items = { itemText... }
 -- items = { { itemText, itemExtraText }... }
@@ -2438,14 +2572,14 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 
 	local gui = self._gui
 	local root = self:getRoot()
-	local p = self.MENU_PADDING
+	local padding = self.MENU_PADDING
 
 	updateLayoutIfNeeded(gui) -- So we get the correct self position here below.
 
 	-- Create menu.
 	local menu = root:insert{
 		type='container', expandX=true, expandY=true, background='cover', closable=true, captureGuiInput=true,
-		[1] = {type='vbar', id='_buttons', background='shadow', padding=p, maxHeight=root:getHeight()},
+		[1] = {type='vbar', id='_buttons', background='shadow', padding=padding, maxHeight=root:getHeight()},
 	}
 	menu:setCallback('closed', function(button, event)
 		if cb then
@@ -2482,8 +2616,8 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 	-- @Incomplete: Make the menu (at least) as wide as self.
 	buttons:_updateLayoutSize() -- Expanding and positioning of the whole menu isn't necessary right here.
 	buttons:setPosition(
-		self._layoutX+self._layoutOffsetX+offsetX-p,
-		math.max(math.min(self._layoutY+self._layoutOffsetY+offsetY-p, root._height-buttons._layoutHeight), 0)
+		self._layoutX+self._layoutOffsetX+offsetX-padding,
+		math.max(math.min(self._layoutY+self._layoutOffsetY+offsetY-padding, root._height-buttons._layoutHeight), 0)
 	)
 
 	return menu
@@ -2571,26 +2705,19 @@ end
 
 -- REPLACE  _draw( )
 function Cs.container:_draw()
-	if self._hidden then
-		return
-	end
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
+	if self._hidden then  return  end
 
-	-- Scissor
-	local scissorX, scissorY, scissorW, scissorH = 0, 0, self._gui:getRoot():getDimensions()
-	if self._maxWidth then
-		scissorX, scissorW = x, w
-	end
-	if self._maxHeight then
-		scissorY, scissorH = y, h
-	end
-	self._gui:_setScissor(scissorX, scissorY, scissorW, scissorH)
+	local gui = self._gui
+	local x, y, w, h = xywh(self)
+
+	local scissorX, scissorY, scissorW, scissorH = 0, 0, gui:getRoot():getDimensions()
+	if self._maxWidth  then  scissorX, scissorW = x, w  end
+	if self._maxHeight then  scissorY, scissorH = y, h  end
+	setScissor(gui, scissorX, scissorY, scissorW, scissorH)
 
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
 	self:_drawDebug(0, 0, 255)
 
@@ -2621,7 +2748,7 @@ function Cs.container:_draw()
 		LG.rectangle('fill', x+1, y+1, sbW-2, handleLen-2)
 	end
 
-	self._gui:_setScissor(nil)
+	setScissor(gui, nil)
 end
 
 
@@ -2703,11 +2830,11 @@ end
 Cs.container:defineGet('_padding')
 
 -- setPadding( padding )
-function Cs.container:setPadding(p)
-	if self._padding == p then
+function Cs.container:setPadding(padding)
+	if self._padding == padding then
 		return
 	end
-	self._padding = p
+	self._padding = padding
 	scheduleLayoutUpdateIfDisplayed(self)
 end
 
@@ -3337,20 +3464,15 @@ Cs.root = Cs.container:extend('GuiRoot', {
 
 -- REPLACE  _draw( )
 function Cs.root:_draw()
-	if self._hidden then
-		return
-	end
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
+	if self._hidden then  return  end
 
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
 	self:_drawDebug(0, 0, 255, 0)
 
-	-- Children
 	for _, child in ipairs(self) do
 		child:_draw()
 	end
@@ -3401,8 +3523,6 @@ end
 
 Cs.leaf = Cs.element:extend('GuiLeaf', {
 
-	PADDING = 2,
-
 	_mnemonicPosition = nil,
 	_textWidth = 0, _textHeight = 0,
 
@@ -3440,6 +3560,14 @@ Cs.leaf:define('_align')
 -- font = getFont( )
 function Cs.leaf:getFont()
 	return self._gui[self._small and '_smallFont' or self._bold and '_boldFont' or '_font']
+end
+
+
+
+-- position = getMnemonicPosition( )
+-- Returns nil if there's no mnemonic.
+function Cs.leaf:getMnemonicPosition()
+	return self._mnemonicPosition
 end
 
 
@@ -3533,8 +3661,6 @@ end
 
 Cs.canvas = Cs.leaf:extend('GuiCanvas', {
 
-	--[[OVERRIDE]] PADDING = 0,
-
 	_canvasBackgroundColor = nil,
 
 })
@@ -3550,38 +3676,39 @@ end
 
 -- REPLACE  _draw( )
 function Cs.canvas:_draw()
-	if self._hidden then
-		return
-	end
+	if self._hidden then  return  end
 
 	local gui = self._gui
-	if gui.debug then
-		self:_drawDebug(255, 0, 0)
-		return
-	end
+	if gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
-
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
-	-- Canvas
+	-- Draw canvas.
+	-- We don't call themeRender() for canvases as they should only draw things though the "draw" event.
 	local cw, ch = (self._width or w), (self._height or h)
 	if (cw > 0 and ch > 0) then
+
 		local cx, cy = x+math.floor((w-cw)/2), y+math.floor((h-ch)/2)
 		local bgColor = self._canvasBackgroundColor
 		if bgColor then
 			LG.setColor(bgColor)
 			LG.rectangle('fill', cx, cy, cw, ch)
 		end
-		gui:_setScissor(cx, cy, cw, ch)
+
+		setScissor(gui, cx, cy, cw, ch)
 		LG.translate(cx, cy)
 		LG.setColor(255, 255, 255)
+
 		self:trigger('draw', cw, ch)
-		gui:_setScissor(nil)
+		if gui._elementScissorIsSet then
+			setScissor(gui, nil)
+			gui._elementScissorIsSet = false
+		end
+
+		setScissor(gui, nil)
 	end
 
 	self:trigger('afterdraw', x, y, w, h)
@@ -3597,10 +3724,10 @@ Cs.canvas:define('_canvasBackgroundColor')
 
 -- REPLACE  _updateLayoutSize( )
 function Cs.canvas:_updateLayoutSize()
-	self._layoutWidth = (self._width or 0)
-	self._layoutHeight = (self._height or 0)
-	self._layoutInnerWidth = self._layoutWidth
-	self._layoutInnerHeight = self._layoutHeight
+	-- We don't call themeGetSize() for canvases as they always have their own private "theme".
+	local w, h = (self._width or 0), (self._height or 0)
+	self._layoutWidth,      self._layoutHeight      = w, h
+	self._layoutInnerWidth, self._layoutInnerHeight = w, h
 end
 
 
@@ -3613,12 +3740,10 @@ end
 
 Cs.image = Cs.leaf:extend('GuiImage', {
 
-	--[[OVERRIDE]] PADDING = 0,
-
 	_imageBackgroundColor = nil,
-	_imagePadding = 0,
+	_imageColor = nil,
+	_imageScaleX = 1.0, _imageScaleY = 1.0,
 	_sprite = nil,
-	_spriteColor = nil,
 
 })
 
@@ -3626,9 +3751,12 @@ function Cs.image:init(gui, data, parent)
 	Cs.image.super.init(self, gui, data, parent)
 
 	retrieve(self, data, '_imageBackgroundColor')
-	retrieve(self, data, '_imagePadding')
+	retrieve(self, data, '_imageColor')
+	-- retrieve(self, data, '_imageScaleX','_imageScaleY')
 	-- retrieve(self, data, '_sprite')
-	retrieve(self, data, '_spriteColor')
+
+	self._imageScaleX = (self._imageScaleX or data.imageScale or 1)
+	self._imageScaleY = (self._imageScaleY or data.imageScale or 1)
 
 	self:setSprite(data.sprite)
 
@@ -3649,34 +3777,23 @@ end
 
 -- REPLACE  _draw( )
 function Cs.image:_draw()
-	if self._hidden then
-		return
-	end
+	if self._hidden then  return  end
+	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
-	if self._gui.debug then
-		self:_drawDebug(255, 0, 0)
-		return
-	end
-
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
-	local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
-
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
-	-- Image
+	local image, quad, iw, ih = nil, nil, 0, 0
 	if self._sprite then
-		local iw, ih = self._sprite:getScaledDimensions()
-		if self._imageBackgroundColor then
-			local iw, ih = iw+2*self._imagePadding, ih+2*self._imagePadding
-			LG.setColor(self._imageBackgroundColor)
-			LG.rectangle('fill', midX-iw/2, midY-ih/2, iw, ih)
-		end
-		self._sprite:draw(midX-iw/2, midY-ih/2)
+		image, quad = self._sprite:getCurrentImage()
+		iw, ih = image:getDimensions()
 	end
+	local sx, sy = self._imageScaleX, self._imageScaleY
+	local imageColor = (self._imageColor or COLOR_WHITE)
+	local imageBgColor = self._imageBackgroundColor
+	themeRender(self, 'image', image, quad, iw*sx, ih*sy, sx, sy, imageColor, imageBgColor)
 
 	self:trigger('afterdraw', x, y, w, h)
 
@@ -3685,65 +3802,107 @@ end
 
 
 -- getImageBackgroundColor, setImageBackgroundColor
-Cs.image:define('_imageBackgroundColor')
+Cs.image:define'_imageBackgroundColor'
 
 
 
--- getSprite
-Cs.image:defineGet('_sprite')
+-- getImageColor, setImageColor
+Cs.image:define('_imageColor')
 
--- sprite = setSprite( sprite )
-function Cs.image:setSprite(sprite)
-	if type(sprite) == 'string' then
-		local spriteLoader = self._gui._spriteLoader
-		sprite = (spriteLoader and spriteLoader(sprite))
+
+
+-- width, height = getImageDimensions( )
+function Cs.image:getImageDimensions()
+	local sprite = self._sprite
+	if not sprite then
+		return 0, 0
 	end
-	if sprite then
-		sprite = sprite:clone()
-		sprite:setAnchor(0, 0)
-		sprite:setOffset(0, 0)
-		if self._spriteColor then
-			sprite:setColor(unpack(self._spriteColor))
-		end
-		self._sprite = sprite
-	else
-		self._sprite = nil
-	end
-	-- @Incomplete: Only update layout if the GuiImage's sprite size is different. (Also, restrict access to the sprite.)
-	scheduleLayoutUpdateIfDisplayed(self)
-	return sprite
+	return sprite:getDimensions()
 end
 
 
 
--- getSpriteColor
-Cs.image:defineGet('_spriteColor')
+-- scaleX, scaleY = getImageScale( )
+function Cs.image:getImageScale()
+	return self._imageScaleX, self._imageScaleY
+end
 
--- setSpriteColor( color )
-function Cs.image:setSpriteColor(color)
-	self._spriteColor = color
-	local sprite = self._sprite
-	if sprite then
-		sprite:setColor(unpack(color or {255,255,255}))
+-- getImageScaleX
+Cs.image:defineGet'_imageScaleX'
+
+-- getImageScaleY
+Cs.image:defineGet'_imageScaleY'
+
+-- setImageScale( scaleX [, scaleY=scaleX ] )
+function Cs.image:setImageScale(sx, sy)
+	assertArg(1, sx, 'number')
+	assertArg(2, sy, 'number','nil')
+	sy = (sy or sx)
+	if (self._imageScaleX == sx and self._imageScaleY == sy) then
+		return
 	end
+	self._imageScaleX = sx
+	self._imageScaleY = sy
+	if self._sprite then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+end
+
+-- setImageScaleX( scaleX )
+function Cs.image:setImageScaleX(sx)
+	assertArg(1, sx, 'number')
+	if self._imageScaleX == sx then  return  end
+	self:setImageScale(sx, self._imageScaleY)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
+end
+
+-- setImageScaleY( scaleY )
+function Cs.image:setImageScaleY(sy)
+	assertArg(1, sy, 'number')
+	if self._imageScaleY == sy then  return  end
+	self:setImageScale(self._imageScaleY, sy)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
+end
+
+
+
+-- setSprite( sprite )
+function Cs.image:setSprite(sprite)
+	assertArg(1, sprite, 'table','string','nil')
+
+	if type(sprite) == 'string' then
+		local spriteLoader = self._gui._spriteLoader
+		sprite = (spriteLoader and spriteLoader(sprite))
+	end
+
+	local oldIw, oldIh = 0, 0
+	if self._sprite then
+		oldIw, oldIh = self._sprite:getDimensions()
+	end
+	self._sprite = (sprite and sprite:clone())
+
+	local iw, ih = 0, 0
+	if self._sprite then
+		iw, ih = self._sprite:getDimensions()
+	end
+	if not (iw == oldIw and ih == oldIh) then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+
 end
 
 
 
 -- REPLACE  _updateLayoutSize( )
 function Cs.image:_updateLayoutSize()
-	if self._sprite then
-		local iw, ih = self._sprite:getScaledDimensions()
-		self._layoutWidth = iw+2*(self._imagePadding+self.PADDING)
-		self._layoutHeight = ih+2*(self._imagePadding+self.PADDING)
-	else
-		self._layoutWidth = 0
-		self._layoutHeight = 0
+	local w, h = nil, nil
+	if not (self._width and self._height) then
+		local iw, ih = self:getImageDimensions()
+		w, h = themeGetSize(self, 'image', iw*self._imageScaleX, ih*self._imageScaleX)
 	end
-	self._layoutWidth = (self._width or self._layoutWidth)
-	self._layoutHeight = (self._height or self._layoutHeight)
-	self._layoutInnerWidth = self._layoutWidth
-	self._layoutInnerHeight = self._layoutHeight
+	w, h = assert(self._width or w), assert(self._height or h)
+	self._layoutWidth,      self._layoutHeight      = w, h
+	self._layoutInnerWidth, self._layoutInnerHeight = w, h
 end
 
 
@@ -3769,45 +3928,17 @@ end
 
 -- REPLACE  _draw( )
 function Cs.text:_draw()
-	if self._hidden then
-		return
-	end
+	if self._hidden then  return  end
+	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
-	if self._gui.debug then
-		self:_drawDebug(255, 0, 0)
-		return
-	end
-
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
-	local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
-	local textY = math.floor(midY-self._textHeight/2)
-
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
-	self._gui:_setScissor(x+1, y+1, w-2, h-2)
-
-	-- Text
-	local textX
-	if (self._align == 'left' or self._textWrapLimit) then
-		textX = self._layoutX+self.PADDING
-	elseif self._align == 'right' then
-		textX = self._layoutX+self._layoutWidth-self.PADDING-self._textWidth
-	else--if align = center
-		textX = midX-math.floor(self._textWidth/2)
-	end
+	local textColor = (self._textColor or COLOR_WHITE)
 	LG.setFont(self:getFont())
-	LG.setColor(self._textColor or {255,255,255})
-	if self._textWrapLimit then
-		LG.printf(self._text, textX, textY, self._textWrapLimit, self._align)
-	else
-		LG.print(self._text, textX, textY)
-	end
-
-	self._gui:_setScissor(nil)
+	themeRender(self, 'text', self._text, self._textWidth, self._textHeight, self._textWrapLimit, self._align, textColor)
 
 	self:trigger('afterdraw', x, y, w, h)
 
@@ -3817,12 +3948,19 @@ end
 
 -- REPLACE  _updateLayoutSize( )
 function Cs.text:_updateLayoutSize()
+
 	local font = self:getFont()
-	self._textWidth, self._textHeight = getTextDimensions(font, self._text, self._textWrapLimit)
-	self._layoutWidth = (self._width or self._textWidth+2*self.PADDING)
-	self._layoutHeight = (self._height or self._textHeight+2*self.PADDING)
-	self._layoutInnerWidth = self._layoutWidth
-	self._layoutInnerHeight = self._layoutHeight
+	local textW, textH = getTextDimensions(font, self._text, self._textWrapLimit)
+	self._textWidth, self._textHeight = textW, textH
+
+	local w, h = nil, nil
+	if not (self._width and self._height) then
+		w, h = themeGetSize(self, 'text', textW, textH)
+	end
+	w, h = assert(self._width or w), assert(self._height or h)
+	self._layoutWidth,      self._layoutHeight      = w, h
+	self._layoutInnerWidth, self._layoutInnerHeight = w, h
+
 end
 
 
@@ -3874,12 +4012,6 @@ end
 
 Cs.button = Cs.widget:extend('GuiButton', {
 
-	--[[OVERRIDE]] PADDING = 3,
-	ARROW = nil, -- Is set here below.
-	ARROW_LENGTH = 2,
-	IMAGE_SPACING = 3, TEXT_SPACING = 6,
-	THEMES = {['normal']=true, ['highlight']=true, ['negative']=true, ['blend']=true},
-
 	_isPressed = false,
 	_textWidth1 = 0, _textWidth2 = 0,
 
@@ -3887,23 +4019,14 @@ Cs.button = Cs.widget:extend('GuiButton', {
 	_canToggle = false,
 	_close = false,
 	_imageBackgroundColor = nil,
+	_imageColor = nil,
 	_imagePadding = 0,
+	_imageScaleX = 1.0, _imageScaleY = 1.0,
 	_sprite = nil,
-	_spriteColor = nil,
 	_text2 = '',
-	_theme = 'normal',
 	_toggled = false,
 
 })
-
--- Create arrow image
-local imageData = love.image.newImageData(Cs.button.ARROW_LENGTH, 4)
-imageData:setPixel(0, 0, 255, 255, 255, 255); imageData:setPixel(1, 0, 255, 255, 255, 0);
-imageData:setPixel(0, 1, 255, 255, 255, 255); imageData:setPixel(1, 1, 255, 255, 255, 255);
-imageData:setPixel(0, 2, 255, 255, 255, 255); imageData:setPixel(1, 2, 255, 255, 255, 255);
-imageData:setPixel(0, 3, 255, 255, 255, 255); imageData:setPixel(1, 3, 255, 255, 255, 0);
-Cs.button.ARROW = LG.newImage(imageData)
-Cs.button.ARROW:setFilter('nearest', 'nearest')
 
 function Cs.button:init(gui, data, parent)
 	Cs.button.super.init(self, gui, data, parent)
@@ -3912,18 +4035,17 @@ function Cs.button:init(gui, data, parent)
 	retrieve(self, data, '_canToggle')
 	retrieve(self, data, '_close')
 	retrieve(self, data, '_imageBackgroundColor')
+	retrieve(self, data, '_imageColor')
+	retrieve(self, data, '_imageScaleX','_imageScaleY')
 	retrieve(self, data, '_imagePadding')
 	-- retrieve(self, data, '_sprite')
-	retrieve(self, data, '_spriteColor')
 	retrieve(self, data, '_text2')
-	-- retrieve(self, data, '_theme')
 	retrieve(self, data, '_toggled')
 
-	self:setSprite(data.sprite)
+	self._imageScaleX = (self._imageScaleX or data.imageScale or 1)
+	self._imageScaleY = (self._imageScaleY or data.imageScale or 1)
 
-	if data.theme then
-		self:setTheme(data.theme)
-	end
+	self:setSprite(data.sprite)
 
 end
 
@@ -3942,165 +4064,24 @@ end
 
 -- REPLACE  _draw( )
 function Cs.button:_draw()
-	if self._hidden then
-		return
-	end
+	if self._hidden then  return  end
+	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
-	if self._gui.debug then
-		self:_drawDebug(255, 0, 0)
-		return
-	end
-
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
-
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	local arrow = self._arrow
-	if arrow then
-		if     arrow == 'right' then
-			w = w-self.ARROW_LENGTH
-		elseif arrow == 'down'  then
-			h = h-self.ARROW_LENGTH
-		elseif arrow == 'left'  then
-			w = w-self.ARROW_LENGTH
-			x = x+self.ARROW_LENGTH
-		elseif arrow == 'up'    then
-			h = h-self.ARROW_LENGTH
-			y = y+self.ARROW_LENGTH
-		end
+	drawLayoutBackground(self)
+
+	local image, quad, iw, ih = nil, nil, 0, 0
+	if self._sprite then
+		image, quad = self._sprite:getCurrentImage()
+		iw, ih = image:getDimensions()
 	end
-
-	local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
-	local textY = midY-math.floor(self._textHeight/2)
-	local opacity = (self._active and 1 or 0.3)
-
-	-- Layout background
-	drawBackground(self)
-
-	-- Button background
-	local isHovered = (self._active and self:isHovered(true))
-	local isBlended = not (self:isMouseFocus() or self:isHovered())
-	-- Background
-	local r, g, b, a = 130, 210, 230, 200 -- Normal theme.
-	if self._toggled then
-		b = b*0.2
-	elseif self._theme == 'normal' then
-		-- void
-	elseif self._theme == 'highlight' then
-		r, g, b = 230, 245, 255
-	elseif self._theme == 'negative' then
-		r, g, b = 235, 83, 67
-	elseif self._theme == 'blend' then
-		if isBlended then
-			a = 50
-		end
-	end
-	if (self._isPressed and isHovered) then
-		r, g, b = 0.7*r, 0.7*g, 0.7*b
-	end
-	LG.setColor(r, g, b, a*opacity)
-	LG.rectangle('fill', x+1, y+1, w-2, h-2)
-	-- Border
-	LG.setColor(255, 255, 255, (isHovered and 255 or 80)*opacity)
-	LG.rectangle('line', x+1+0.5, y+1+0.5, w-2-1, h-2-1)
-
-	-- Arrow
-	local arrow = self._arrow
-	if (arrow and self._toggled) then
-		local iw, ih = self.ARROW:getDimensions()
-		local function drawArrow(x, y, angQuarter)
-			local ang = angQuarter*TAU/4
-			LG.setColor(r, g, b, a*opacity)
-			LG.draw(self.ARROW, x, y, ang)
-			LG.setColor(255, 255, 255, (isHovered and 255 or 80)*opacity)
-			LG.draw(self.ARROW, x, y, ang)
-		end
-		if     arrow == 'right' then
-			drawArrow(x+w-1, y+(h-ih)/2, 0)
-		elseif arrow == 'down'  then
-			drawArrow(x+(w+ih)/2, y+h-1, 1)
-		elseif arrow == 'left'  then
-			drawArrow(x+1, y+(h+ih)/2, 2)
-		elseif arrow == 'up'    then
-			drawArrow(x+(w-ih)/2, y+1, 3)
-		end
-	end
-
-	self._gui:_setScissor(x+2, y+2, w-2*2, h-2*2)
-
-	-- Image
-	-- @Incomplete: Support 'align' for no-text image buttons.
-	if (self._sprite and self._text == '' and self._text2 == '') then
-		local iw, ih = self._sprite:getScaledDimensions()
-		if self._imageBackgroundColor then
-			local iw, ih = iw+2*self._imagePadding, ih+2*self._imagePadding
-			local r, g, b, a = unpack(self._imageBackgroundColor)
-			LG.setColor(r, g, b, a*opacity)
-			LG.rectangle('fill', midX-iw/2, midY-ih/2, iw, ih)
-		end
-		self._sprite:draw(midX-iw/2, midY-ih/2)
-
-	-- Text
-	elseif not self._sprite then
-		local text1X, text2X
-		if self._align == 'left' then
-			text1X = x+self.PADDING
-			text2X = math.max(x+w-self.PADDING-self._textWidth2, text1X+self._textWidth1+self.TEXT_SPACING)
-		elseif self._align == 'right' then
-			text1X = math.max(x+w-self.PADDING-self._textWidth1, x+self.PADDING)
-			text2X = math.min(x+self.PADDING, text1X-self.TEXT_SPACING-self._textWidth2)
-		else--if align = center
-			text1X = math.max(midX-math.floor(self._textWidth/2), x+self.PADDING)
-			text2X = text1X+self._textWidth1+self.TEXT_SPACING
-		end
-		local font = self:getFont()
-		local r, g, b = 0, 0, 0
-		if (self._theme == 'blend' and isBlended) then
-			r, g, b = 255, 255, 255
-		end
-		LG.setFont(font)
-		if self._text2 ~= '' then
-			LG.setColor(r, g, b, 100*opacity)
-			LG.print(self._text2, text2X, textY)
-		end
-		LG.setColor(r, g, b, 255*opacity)
-		LG.print(self._text, text1X, textY)
-		if self._mnemonicPosition then
-			local mnemonicX1 = text1X+font:getWidth(self._text:sub(1, self._mnemonicPosition-1))-1
-			local mnemonicX2 = text1X+font:getWidth(self._text:sub(1, self._mnemonicPosition))
-			LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
-		end
-
-	-- Image and text
-	else
-		local iw, ih = self._sprite:getScaledDimensions()
-		if self._imageBackgroundColor then
-			local iw, ih = iw+2*self._imagePadding, ih+2*self._imagePadding
-			local r, g, b, a = unpack(self._imageBackgroundColor)
-			LG.setColor(r, g, b, a*opacity)
-			LG.rectangle('fill', x+self.PADDING, midY-ih/2, iw, ih)
-		end
-		local text1X = x+self.PADDING+(iw+2*self._imagePadding)+self.IMAGE_SPACING
-		local text2X = x+w-self.PADDING-self._textWidth2
-		local font = self:getFont()
-		self._sprite:draw(x+self.PADDING+self._imagePadding, midY-ih/2)
-		LG.setFont(font)
-		LG.setColor(0, 0, 0, 255*opacity)
-		LG.print(self._text, text1X, textY)
-		if self._text2 ~= '' then
-			LG.setColor(0, 0, 0, 100*opacity)
-			LG.print(self._text2, text2X, textY)
-		end
-		if self._mnemonicPosition then
-			local mnemonicX1 = text1X+font:getWidth(self._text:sub(1, self._mnemonicPosition-1))-1
-			local mnemonicX2 = text1X+font:getWidth(self._text:sub(1, self._mnemonicPosition))
-			LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
-		end
-
-	end
-
-	self._gui:_setScissor(nil)
+	LG.setFont(self:getFont())
+	themeRender(
+		self, 'button', self._text, self._text2, self._textWidth1, self._textWidth2, self._textHeight, self._align,
+		image, quad, iw*self._imageScaleX, ih*self._imageScaleY,
+		sx, sy, (self._imageColor or COLOR_WHITE), self._imageBackgroundColor, self._imagePadding)
 
 	self:trigger('afterdraw', x, y, w, h)
 
@@ -4108,48 +4089,71 @@ end
 
 
 
+Cs.button:defineGet'_arrow'
+
+
+
 -- getImageBackgroundColor, setImageBackgroundColor
-Cs.button:define('_imageBackgroundColor')
+Cs.button:define'_imageBackgroundColor'
 
 
 
--- getSprite
-Cs.button:defineGet('_sprite')
+-- getImageColor, setImageColor
+Cs.button:defineGet('_imageColor')
 
--- sprite = setSprite( sprite )
-function Cs.button:setSprite(sprite)
-	if type(sprite) == 'string' then
-		local spriteLoader = self._gui._spriteLoader
-		sprite = (spriteLoader and spriteLoader(sprite))
+
+
+-- width, height = getImageDimensions( )
+function Cs.button:getImageDimensions()
+	local sprite = self._sprite
+	if not sprite then
+		return 0, 0
 	end
-	if sprite then
-		sprite = sprite:clone()
-		sprite:setAnchor(0, 0)
-		sprite:setOffset(0, 0)
-		if self._spriteColor then
-			sprite:setColor(unpack(self._spriteColor))
-		end
-		self._sprite = sprite
-	else
-		self._sprite = nil
-	end
-	-- @Incomplete: Only update layout if GuiButton's sprite size is different. (Also, restrict access to the sprite.)
-	scheduleLayoutUpdateIfDisplayed(self)
-	return sprite
+	return sprite:getDimensions()
 end
 
 
 
--- getSpriteColor
-Cs.button:defineGet('_spriteColor')
+-- scaleX, scaleY = getImageScale( )
+function Cs.button:getImageScale()
+	return self._imageScaleX, self._imageScaleY
+end
 
--- setSpriteColor( color )
-function Cs.button:setSpriteColor(color)
-	self._spriteColor = color
-	local sprite = self._sprite
-	if sprite then
-		sprite:setColor(unpack(color or {255,255,255}))
+-- getImageScaleX
+Cs.button:defineGet'_imageScaleX'
+
+-- getImageScaleY
+Cs.button:defineGet'_imageScaleY'
+
+-- setImageScale( scaleX [, scaleY=scaleX ] )
+function Cs.button:setImageScale(sx, sy)
+	assertArg(1, sx, 'number')
+	assertArg(2, sy, 'number','nil')
+	sy = (sy or sx)
+	if (self._imageScaleX == sx and self._imageScaleY == sy) then
+		return
 	end
+	self._imageScaleX = sx
+	self._imageScaleY = sy
+	if self._sprite then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+end
+
+-- setImageScaleX( scaleX )
+function Cs.button:setImageScaleX(sx)
+	assertArg(1, sx, 'number')
+	if self._imageScaleX == sx then  return  end
+	self:setImageScale(sx, self._imageScaleY)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
+end
+
+-- setImageScaleY( scaleY )
+function Cs.button:setImageScaleY(sy)
+	assertArg(1, sy, 'number')
+	if self._imageScaleY == sy then  return  end
+	self:setImageScale(self._imageScaleY, sy)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
 end
 
 
@@ -4168,7 +4172,7 @@ function Cs.button:setText(text)
 
 	local font = self:getFont()
 	self._textWidth1 = font:getWidth(self._text)
-	self._textWidth = self._textWidth1+(self._textWidth2 > 0 and self.TEXT_SPACING+self._textWidth2 or 0)
+	self._textWidth = self._textWidth1+self._textWidth2
 
 	if self._textWidth ~= oldW then
 		scheduleLayoutUpdateIfDisplayed(self)
@@ -4184,26 +4188,11 @@ function Cs.button:setText2(text)
 	local font, oldW = self:getFont(), self._textWidth
 	self._text2 = text
 	self._textWidth2 = font:getWidth(text)
-	self._textWidth = self._textWidth1+(self._textWidth2 > 0 and self.TEXT_SPACING+self._textWidth2 or 0)
+	self._textWidth = self._textWidth1+self._textWidth2
 
 	if self._textWidth ~= oldW then
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
-end
-
-
-
--- theme = getTheme( )
-function Cs.button:getTheme()
-	return self._theme
-end
-
--- setTheme( theme )
-function Cs.button:setTheme(theme)
-	if not self.THEMES[theme] then
-		errorf('bad theme name %q', tostring(theme))
-	end
-	self._theme = theme
 end
 
 
@@ -4299,6 +4288,38 @@ function Cs.button:press(ignoreActiveState)
 	return true
 end
 
+-- state = isPressed( )
+function Cs.button:isPressed()
+	return self._isPressed
+end
+
+
+
+-- setSprite( sprite )
+function Cs.button:setSprite(sprite)
+	assertArg(1, sprite, 'table','string','nil')
+
+	if type(sprite) == 'string' then
+		local spriteLoader = self._gui._spriteLoader
+		sprite = (spriteLoader and spriteLoader(sprite))
+	end
+
+	local oldIw, oldIh = 0, 0
+	if self._sprite then
+		oldIw, oldIh = self._sprite:getDimensions()
+	end
+	self._sprite = (sprite and sprite:clone())
+
+	local iw, ih = 0, 0
+	if self._sprite then
+		iw, ih = self._sprite:getDimensions()
+	end
+	if not (iw == oldIw and ih == oldIh) then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+
+end
+
 
 
 -- REPLACE  _updateLayoutSize( )
@@ -4307,35 +4328,19 @@ function Cs.button:_updateLayoutSize()
 	local font = self:getFont()
 	self._textWidth1 = font:getWidth(self._text)
 	self._textWidth2 = font:getWidth(self._text2)
-	self._textWidth = self._textWidth1+(self._textWidth2 > 0 and self.TEXT_SPACING+self._textWidth2 or 0)
+	self._textWidth = self._textWidth1+self._textWidth2 -- This value is pretty useless...
 	self._textHeight = font:getHeight()
 
-	local w, h
-
-	-- Image
-	if (self._sprite and self._text == '' and self._text2 == '') then
-		local iw, ih = self._sprite:getScaledDimensions()
-		w = iw+2*(self._imagePadding+self.PADDING)
-		h = ih+2*(self._imagePadding+self.PADDING)
-
-	-- Text
-	elseif not self._sprite then
-		w = self._textWidth+2*self.PADDING
-		h = self._textHeight+2*self.PADDING
-
-	-- Image and text
-	else
-		local iw, ih = self._sprite:getScaledDimensions()
-		w = iw+self._textWidth+self.IMAGE_SPACING+2*(self._imagePadding+self.PADDING)
-		h = math.max(self._textHeight, ih+2*self._imagePadding)+2*self.PADDING
-
+	local w, h = nil, nil
+	if not (self._width and self._height) then
+		local iw, ih = self:getImageDimensions()
+		w, h = themeGetSize(
+			self, 'button', self._textWidth1, self._textWidth2, self._textHeight,
+			iw*self._imageScaleX, ih*self._imageScaleX, self._imagePadding)
 	end
-	w = w+((self._arrow == 'left' or self._arrow == 'right') and self.ARROW_LENGTH or 0)
-	h = h+((self._arrow == 'up' or self._arrow == 'down') and self.ARROW_LENGTH or 0)
-	self._layoutWidth = (self._width or w)
-	self._layoutHeight = (self._height or h)
-	self._layoutInnerWidth = self._layoutWidth
-	self._layoutInnerHeight = self._layoutHeight
+	w, h = assert(self._width or w), assert(self._height or h)
+	self._layoutWidth,      self._layoutHeight      = w, h
+	self._layoutInnerWidth, self._layoutInnerHeight = w, h
 
 end
 
@@ -4349,7 +4354,9 @@ end
 
 Cs.input = Cs.widget:extend('GuiInput', {
 
-	--[[OVERRIDE]] PADDING = 4,
+	-- @Cleanup: Remove usage of GuiInput.PADDING .
+	-- This is used by InputField and mouse stuff - need to solve that together with themes!
+	PADDING = 4,
 
 	_field = nil,
 	_savedKeyRepeat = false,
@@ -4390,61 +4397,17 @@ end
 
 -- REPLACE  _draw( )
 function Cs.input:_draw()
-	if self._hidden then
-		return
-	end
+	if self._hidden then  return  end
+	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
-	if self._gui.debug then
-		self:_drawDebug(255, 0, 0)
-		return
-	end
-
-	local x, y = self._layoutX+self._layoutOffsetX, self._layoutY+self._layoutOffsetY
-	local w, h = self._layoutWidth, self._layoutHeight
-	local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
-	local textY = midY-math.floor(self._textHeight/2)
-	local opacity = (self._active and 1 or 0.3)
-
+	local x, y, w, h = xywh(self)
 	self:trigger('beforedraw', x, y, w, h)
 
-	-- Layout background
-	drawBackground(self)
+	drawLayoutBackground(self)
 
-	-- Input background
-	local isHovered = (self:isKeyboardFocus() or self._active and self:isHovered(true))
-	-- Background
-	if self:isKeyboardFocus() then
-		LG.setColor(100, 255, 100, 40)
-		LG.rectangle('fill', x+1, y+1, w-2, h-2)
-	end
-	-- Border
-	LG.setColor(255, 255, 255, (isHovered and 255 or 100)*opacity)
-	LG.rectangle('line', x+1+0.5, y+1+0.5, w-2-1, h-2-1)
-
-	self._gui:_setScissor(x+self.PADDING-1, y+self.PADDING-1, self._layoutInnerWidth+2, self._layoutInnerHeight+2)
-
-	-- Selection
-	if self:isKeyboardFocus() then
-		local x1, x2 = self._field:getSelectionOffset()
-		if x2 > x1 then
-			LG.setColor(255, 255, 0, 100)
-			LG.rectangle('fill', x+self.PADDING+x1, textY, x2-x1, self._textHeight)
-		end
-	end
-
-	-- Value
-	LG.setFont(self:getFont())
-	LG.setColor(255, 255, 255, 255*opacity)
-	LG.print(self._field:getVisibleText(), x+self.PADDING+self._field:getTextOffset(), textY)
-
-	-- Cursor
-	if self:isKeyboardFocus() then
-		local opacity = ((math.cos(5*self._field:getBlinkPhase())+1)/2)^0.5
-		LG.setColor(255, 255, 255, 255*opacity)
-		LG.rectangle('fill', x+self.PADDING+self._field:getCursorOffset()-1, textY, 1, self._textHeight)
-	end
-
-	self._gui:_setScissor(nil)
+	local font = self:getFont()
+	LG.setFont(font)
+	themeRender(self, 'input', self:getVisibleValue(), font:getHeight())
 
 	self:trigger('afterdraw', x, y, w, h)
 
@@ -4626,14 +4589,14 @@ end
 
 -- REPLACE  _updateLayoutSize( )
 function Cs.input:_updateLayoutSize()
-	local font = self:getFont()
-	self._textWidth = font:getWidth(self._text)
-	self._textHeight = font:getHeight()
-	self._layoutWidth = self._width
-	self._layoutHeight = (self._height or self._textHeight+2*self.PADDING)
-	self._layoutInnerWidth = self._layoutWidth-2*self.PADDING
-	self._layoutInnerHeight = self._layoutHeight-2*self.PADDING
-	self._field:setWidth(self._layoutInnerWidth)
+	local w, h = nil, nil
+	if not self._height then
+		-- We only care about the height returned from themeGetSize() as the width is always defined for inputs.
+		w, h = themeGetSize(self, 'input', 0, self:getFont():getHeight())
+	end
+	w, h = assert(self._width), assert(self._height or h)
+	self._layoutWidth,      self._layoutHeight      = w, h
+	self._layoutInnerWidth, self._layoutInnerHeight = w, h
 end
 
 -- OVERRIDE  _expandLayout( [ expandWidth, expandHeight ] )
@@ -4645,6 +4608,337 @@ function Cs.input:_expandLayout(expandW, expandH)
 end
 
 
+
+--==============================================================
+--==============================================================
+--==============================================================
+
+local TEXT_PADDING = 1
+
+local BUTTON_PADDING = 3
+local BUTTON_ARROW
+local BUTTON_ARROW_LENGTH = 3
+local BUTTON_IMAGE_SPACING, BUTTON_TEXT_SPACING = 3, 6
+do
+	local dat = love.image.newImageData(BUTTON_ARROW_LENGTH, 5)
+	dat:setPixel(0,0,255,255,255,255); dat:setPixel(1,0,255,255,255,  0); dat:setPixel(2,0,255,255,255,  0);
+	dat:setPixel(0,1,255,255,255,255); dat:setPixel(1,1,255,255,255,255); dat:setPixel(2,1,255,255,255,  0);
+	dat:setPixel(0,2,255,255,255,255); dat:setPixel(1,2,255,255,255,255); dat:setPixel(2,2,255,255,255,255);
+	dat:setPixel(0,3,255,255,255,255); dat:setPixel(1,3,255,255,255,255); dat:setPixel(2,3,255,255,255,  0);
+	dat:setPixel(0,4,255,255,255,255); dat:setPixel(1,4,255,255,255,  0); dat:setPixel(2,4,255,255,255,  0);
+	BUTTON_ARROW = LG.newImage(dat)
+	BUTTON_ARROW:setFilter('nearest', 'nearest')
+end
+
+local INPUT_PADDING = 4
+
+defaultTheme = {
+
+	----------------------------------------------------------------
+
+	size = {
+
+		-- size.canvas( element, canvasWidth, canvasHeight )
+		['canvas'] = function(el, cw, ch)
+			return cw, ch
+		end,
+
+		-- size.image( element, imageWidth, imageHeight )
+		['image'] = function(el, iw, ih)
+			return iw, ih
+		end,
+
+		-- size.text( element, textWidth, textHeight )
+		['text'] = function(el, textW, textH)
+			return textW+2*TEXT_PADDING, textH+2*TEXT_PADDING
+		end,
+
+		-- size.button( element, text1Width, text2Width, textHeight, imageWidth, isHovered )
+		['button'] = function(el, text1W, text2W, textH, iw, ih, imagePadding)
+			local textW = text1W+(text2W > 0 and BUTTON_TEXT_SPACING+text2W or 0)
+			local w, h
+
+			-- Only image.
+			if iw > 0 and text1W+text2W == 0 then
+				w = iw+2*(imagePadding+BUTTON_PADDING)
+				h = ih+2*(imagePadding+BUTTON_PADDING)
+
+			-- Only text.
+			elseif iw == 0 then
+				w = textW+2*BUTTON_PADDING
+				h = textH+2*BUTTON_PADDING
+
+			-- Image and text.
+			else
+				w = iw+textW+BUTTON_IMAGE_SPACING+2*(imagePadding+BUTTON_PADDING)
+				h = math.max(textH, ih+2*imagePadding)+2*BUTTON_PADDING
+
+			end
+
+			local arrow = el:getArrow()
+			w = w+((arrow == 'left' or arrow == 'right') and BUTTON_ARROW_LENGTH or 0)
+			h = h+((arrow == 'up'   or arrow == 'down' ) and BUTTON_ARROW_LENGTH or 0)
+
+			return w, h
+		end,
+
+		-- size.input( element, _, valueHeight )
+		['input'] = function(el, _, valueHeight)
+			return 0, valueHeight+2*INPUT_PADDING -- Only the returned height is used.
+		end,
+
+	},
+
+	----------------------------------------------------------------
+
+	draw = {
+
+		-- draw.image( element, width, height, image, imageWidth, imageHeight, imageScaleX, imageScaleY, imageColor, imageBackgroundColor )
+		['image'] = function(el, w, h, image, quad, iw, ih, sx, sy, imageColor, imageBgColor)
+
+			if not image then  return  end
+
+			local x = math.floor((w-iw)/2)
+			local y = math.floor((h-ih)/2)
+
+			if imageBgColor then
+				LG.setColor(imageBgColor)
+				LG.rectangle('fill', x, y, iw, ih)
+			end
+
+			LG.setColor(imageColor)
+			LG.draw(image, quad, x, y, 0, sx, sy)
+
+		end,
+
+		-- draw.text( element, width, height, text, textWidth, textHeight, wrapLimit, align, textColor )
+		['text'] = function(el, w, h, text, textW, textH, wrapLimit, align, textColor)
+
+			local textX
+			if (align == 'left' or wrapLimit) then
+				textX = TEXT_PADDING
+			elseif align == 'right' then
+				textX = w-TEXT_PADDING-textW
+			else--if align == 'center' then
+				textX = math.floor((w-textW)/2)
+			end
+			local textY = math.floor((h-textH)/2)
+
+			el:setScissor(0, 0, w, h) -- Make sure text does not render outside the element.
+			LG.setColor(textColor)
+			if wrapLimit then
+				LG.printf(text, textX, textY, wrapLimit, align)
+			else
+				LG.print(text, textX, textY)
+			end
+
+		end,
+
+		-- draw.button(
+		--    element, width, height, text1, text2, text1Width, text2Width, textHeight, align,
+		--    image, quad, imageWidth, isHovered, imageScaleX, imageScaleY, imageColor, imageBackgroundColor,
+		--    imagePadding )
+		-- Tags: normal, highlight, negative, blend
+		['button'] = function(
+			el, w, h, text1, text2, text1W, text2W, textH, align,
+			image, quad, iw, ih, sx, sy, imageColor, imageBgColor, imagePadding
+		)
+
+			-- Exclude any arrow from our position and dimensions.
+			local arrow = el:getArrow()
+			local x, y = 0, 0
+			if arrow then
+				if     arrow == 'right' then
+					w = w-BUTTON_ARROW_LENGTH
+				elseif arrow == 'down'  then
+					h = h-BUTTON_ARROW_LENGTH
+				elseif arrow == 'left'  then
+					w = w-BUTTON_ARROW_LENGTH
+					x = x+BUTTON_ARROW_LENGTH
+				elseif arrow == 'up'    then
+					h = h-BUTTON_ARROW_LENGTH
+					y = y+BUTTON_ARROW_LENGTH
+				end
+			end
+
+			local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
+			local textY = midY-math.floor(textH/2)
+			local opacity = (el:isActive() and 1 or 0.3)
+
+			local isHovered = (el:isActive() and el:isHovered(true))
+
+			local r, g, b = 255, 255, 255
+			if el:isToggled() then
+				r, g, b = 100, 200, 255
+			end
+			if (el:isPressed() and isHovered) then
+				r, g, b = r*0.6, g*0.6, b*0.6
+			end
+
+			-- Background
+			LG.setColor(r, g, b, (isHovered and 70 or 50)*opacity)
+			LG.rectangle('fill', x+1, y+1, w-2, h-2)
+
+			-- Arrow
+			if (arrow and el:isToggled()) then
+				local arrLen = BUTTON_ARROW_LENGTH
+				LG.setColor(255, 255, 255)
+				if     arrow == 'right' then  LG.draw(BUTTON_ARROW, x+(w-1),        y+(h-arrLen)/2, 0*tau/4)
+				elseif arrow == 'down'  then  LG.draw(BUTTON_ARROW, x+(w+arrLen)/2, y+(h-1),        1*tau/4)
+				elseif arrow == 'left'  then  LG.draw(BUTTON_ARROW, x+(1),          y+(h+arrLen)/2, 2*tau/4)
+				elseif arrow == 'up'    then  LG.draw(BUTTON_ARROW, x+(w-arrLen)/2, y+(1),          3*tau/4)
+				end
+			end
+
+			el:setScissor(x+2, y+2, w-2*2, h-2*2)
+
+			-- Only image.
+			-- @Incomplete: Support 'align' for no-text image buttons.
+			if (image and text1 == '' and text2 == '') then
+
+				if imageBgColor then
+					local r, g, b, a = unpack(imageBgColor)
+					LG.setColor(r, g, b, a*opacity)
+					LG.rectangle(
+						'fill', midX-iw/2-imagePadding, midY-ih/2-imagePadding,
+						iw+2*imagePadding, ih+2*imagePadding)
+				end
+
+				do
+					local r, g, b, a = unpack(imageColor)
+					LG.setColor(r, g, b, a*opacity)
+					LG.draw(image, quad, midX-iw/2, midY-ih/2, 0, sx, sy)
+				end
+
+			-- Only text.
+			elseif not image then
+
+				local text1X, text2X
+				if align == 'left' then
+					text1X = x+BUTTON_PADDING
+					text2X = math.max(x+w-BUTTON_PADDING-text2W, text1X+text1W+BUTTON_TEXT_SPACING)
+				elseif align == 'right' then
+					text1X = math.max(x+w-BUTTON_PADDING-text1W, x+BUTTON_PADDING)
+					text2X = math.min(x+BUTTON_PADDING, text1X-BUTTON_TEXT_SPACING-text2W)
+				else--if align = center
+					local textW = text1W+(text2W > 0 and BUTTON_TEXT_SPACING+text2W or 0)
+					text1X = math.max(midX-math.floor(textW/2), x+BUTTON_PADDING)
+					text2X = text1X+text1W+BUTTON_TEXT_SPACING
+				end
+
+				if text2 ~= '' then
+					LG.setColor(255, 255, 255, 150*opacity)
+					LG.print(text2, text2X, textY)
+				end
+				LG.setColor(255, 255, 255, 255*opacity)
+				LG.print(text1, text1X, textY)
+
+				local mnemonicPos = el:getMnemonicPosition()
+				if mnemonicPos then
+					local font = el:getFont()
+					local mnemonicX1 = text1X+font:getWidth(text1:sub(1, mnemonicPos-1))-1
+					local mnemonicX2 = text1X+font:getWidth(text1:sub(1, mnemonicPos))
+					LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
+				end
+
+			-- Image and text.
+			else
+
+				if imageBgColor then
+					local r, g, b, a = unpack(imageBgColor)
+					LG.setColor(r, g, b, a*opacity)
+					LG.rectangle(
+						'fill', x+BUTTON_PADDING, midY-ih/2-imagePadding,
+						iw+2*imagePadding, ih+2*imagePadding)
+				end
+
+				local text1X = x+BUTTON_PADDING+(iw+2*imagePadding)+BUTTON_IMAGE_SPACING
+				local text2X = x+w-BUTTON_PADDING-text2W
+
+				do
+					local r, g, b, a = unpack(imageColor)
+					LG.setColor(r, g, b, a*opacity)
+					LG.draw(image, quad, x+BUTTON_PADDING+imagePadding, midY-ih/2, 0, sx, sy)
+				end
+
+				LG.setColor(255, 255, 255, 255*opacity)
+				LG.print(text1, text1X, textY)
+				if text2 ~= '' then
+					LG.setColor(255, 255, 255, 150*opacity)
+					LG.print(text2, text2X, textY)
+				end
+
+				local mnemonicPos = el:getMnemonicPosition()
+				if mnemonicPos then
+					local font = el:getFont()
+					local mnemonicX1 = text1X+font:getWidth(text1:sub(1, mnemonicPos-1))-1
+					local mnemonicX2 = text1X+font:getWidth(text1:sub(1, mnemonicPos))
+					LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
+				end
+
+			end
+
+		end,
+
+		-- draw.input( element, width, height, value, valueHeight )
+		['input'] = function(el, w, h, v, valueH)
+			local field = el:getField()
+			local textY = math.floor((h-valueH)/2)
+			local opacity = (el:isActive() and 1 or 0.3)
+
+			-- Background
+			if el:isKeyboardFocus() then
+				LG.setColor(100, 255, 100, 40)
+				LG.rectangle('fill', 1, 1, w-2, h-2)
+			end
+
+			-- Border
+			local isHovered = (el:isKeyboardFocus() or el:isActive() and el:isHovered(true))
+			LG.setColor(255, 255, 255, (isHovered and 255 or 100)*opacity)
+			LG.rectangle('line', 1+0.5, 1+0.5, w-2-1, h-2-1)
+
+			el:setScissor(INPUT_PADDING-1, INPUT_PADDING-1, w-2*INPUT_PADDING+2, h-2*INPUT_PADDING+2)
+
+			-- Selection
+			if el:isKeyboardFocus() then
+				local x1, x2 = field:getSelectionOffset()
+				if x2 > x1 then
+					LG.setColor(255, 255, 255, 100)
+					LG.rectangle('fill', INPUT_PADDING+x1, textY, x2-x1, valueH)
+				end
+			end
+
+			-- Value
+			LG.setColor(255, 255, 255, 255*opacity)
+			LG.print(v, INPUT_PADDING+field:getTextOffset(), textY)
+
+			-- Cursor
+			if el:isKeyboardFocus() then
+				local opacity = ((math.cos(5*field:getBlinkPhase())+1)/2)^0.5
+				LG.setColor(255, 255, 255, 255*opacity)
+				LG.rectangle('fill', INPUT_PADDING+field:getCursorOffset()-1, textY, 1, valueH)
+			end
+
+		end,
+
+		-- draw.navigation( element, width, height, timeSinceNavigation )
+		['navigation'] = function(el, w, h, time)
+			local offset = 10*math.max(1-time/0.1, 0)
+			local x, y = -offset, -offset
+			w, h = w+2*offset, h+2*offset
+
+			LG.setColor(255, 255, 0, 40)
+			LG.rectangle('fill', x+1, y+1, w-2, h-2)
+			LG.setColor(255, 255, 0, 255)
+			LG.rectangle('line', x+0.5, y+0.5, w-1, h-1)
+
+		end,
+
+	},
+
+	----------------------------------------------------------------
+
+}
 
 --==============================================================
 --==============================================================

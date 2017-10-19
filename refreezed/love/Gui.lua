@@ -40,6 +40,8 @@
 --=
 --==============================================================
 
+	STATIC  newMonochromeImage, newImageUsingPalette
+
 	update
 	draw
 
@@ -192,9 +194,10 @@ local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.cl
 local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- In same folder.
 local LG = love.graphics
 
+local COLOR_TRANSPARENT = {0,0,0,0}
 local COLOR_WHITE = {255,255,255,255}
 local DEFAULT_FONT = LG.newFont(12)
-local TAU = 2*math.pi
+local tau = 2*math.pi
 
 local Gui = newClass('Gui', {
 
@@ -265,7 +268,7 @@ local reverseArray
 local round
 local setMouseFocus, setKeyboardFocus
 local setScissor
-local themeCallBack, themeRender, themeGetSize
+local themeCallBack, themeGet, themeRender, themeGetSize
 local updateHoveredElement, validateNavigationTarget
 local updateLayout, updateLayoutIfNeeded, scheduleLayoutUpdateIfDisplayed
 local xywh
@@ -344,6 +347,7 @@ end
 
 
 -- drawLayoutBackground( element )
+-- @Incomplete: Move layout backgrounds to themes.
 function drawLayoutBackground(el)
 	local bg = el._background
 	if not bg then  return  end
@@ -587,6 +591,16 @@ function themeCallBack(gui, k, what, ...)
 	return cb(...)
 end
 
+-- value = themeGet( gui, key )
+function themeGet(gui, k)
+	local theme = gui._theme
+	local v = (theme and theme[k])
+	if v == nil then
+		return defaultTheme[k]
+	end
+	return v
+end
+
 -- themeRender( element, what, extraArgument... )
 function themeRender(el, what, ...)
 	local gui = el._gui
@@ -795,7 +809,71 @@ end
 
 
 --==============================================================
---= Gui ========================================================
+--= Utilities / Static GUI Methods =============================
+--==============================================================
+
+
+
+--[[
+	STATIC  image = newMonochromeImage( pixelRows [, red=255, green=255, blue=255 ] )
+	pixelRows = { pixelRow... }
+	pixelRow: String with single-digit hexadecimal numbers. Invalid characters counts as 0.
+	Example:
+		antialiasedDiagonalLine = Gui.newMonochromeImage{
+			" 5F",
+			"5F5",
+			"F5 ",
+		}
+]]
+function Gui.newMonochromeImage(pixelRows, r, g, b)
+	r, g, b = (r or 255), (g or 255), (b or 255)
+	local imageData = love.image.newImageData(#pixelRows[1], #pixelRows)
+	for row, pixelRow in ipairs(pixelRows) do
+		for col = 1, #pixelRow do
+			local pixel = (tonumber(pixelRow:sub(col, col), 16) or 0)
+			imageData:setPixel(col-1, row-1, r, g, b, 17*pixel)
+		end
+	end
+	return LG.newImage(imageData)
+end
+
+--[[
+	STATIC  image = newImageUsingPalette( pixelRows, palette )
+	pixelRows = { pixelRow... }
+	pixelRow: String with single-character palette indices. Invalid indices counts as transparent pixels.
+	palette = { ["index"]=color... }
+	color = { red, green, blue [, alpha=255 ] }
+	Example:
+		doubleWideRainbow = Gui.newImageUsingPalette(
+			{
+				"rygcbp",
+				"rygcbp",
+			}, {
+				["r"] = {255,  0,  0}, -- Red
+				["y"] = {255,255,  0}, -- Yellow
+				["g"] = {0,  255,  0}, -- Green
+				["c"] = {0,  255,255}, -- Cyan
+				["b"] = {0,  0,  255}, -- Blue
+				["p"] = {255,0,  255}, -- Purple
+			}
+		)
+]]
+function Gui.newImageUsingPalette(pixelRows, palette)
+	local imageData = love.image.newImageData(#pixelRows[1], #pixelRows)
+	for row, pixelRow in ipairs(pixelRows) do
+		for col = 1, #pixelRow do
+			local pixel = (palette[pixelRow:sub(col, col)] or COLOR_TRANSPARENT)
+			local r, g, b, a = unpack(pixel)
+			imageData:setPixel(col-1, row-1, r, g, b, (a or 255))
+		end
+	end
+	return LG.newImage(imageData)
+end
+
+
+
+--==============================================================
+--= GUI ========================================================
 --==============================================================
 
 
@@ -1113,7 +1191,7 @@ do
 	end
 
 	-- element = navigate( angle )
-	local MAX_ANGLE_DIFF = TAU/4
+	local MAX_ANGLE_DIFF = tau/4
 	function Gui:navigate(targetAng)
 		if self._lockNavigation then
 			return nil
@@ -4354,10 +4432,6 @@ end
 
 Cs.input = Cs.widget:extend('GuiInput', {
 
-	-- @Cleanup: Remove usage of GuiInput.PADDING .
-	-- This is used by InputField and mouse stuff - need to solve that together with themes!
-	PADDING = 4,
-
 	_field = nil,
 	_savedKeyRepeat = false,
 	_savedValue = '',
@@ -4548,18 +4622,18 @@ function Cs.input:_mouseDown(x, y, buttonN)
 	end
 	self:focus()
 	self._gui._mouseFocusSet[buttonN] = true
-	self._field:mouseDown(x-self._layoutX-self.PADDING, 0, buttonN)
+	self._field:mouseDown(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
 	return true, false -- NOTE: We've set the focus ourselves
 end
 
 -- REPLACE  _mouseMove( x, y )
 function Cs.input:_mouseMove(x, y)
-	self._field:mouseMove(x-self._layoutX-self.PADDING, 0)
+	self._field:mouseMove(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0)
 end
 
 -- REPLACE  _mouseUp( x, y, button )
 function Cs.input:_mouseUp(x, y, buttonN)
-	self._field:mouseUp(x-self._layoutX-self.PADDING, 0, buttonN)
+	self._field:mouseUp(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
 end
 
 
@@ -4602,8 +4676,9 @@ end
 -- OVERRIDE  _expandLayout( [ expandWidth, expandHeight ] )
 function Cs.input:_expandLayout(expandW, expandH)
 	Cs.input.super._expandLayout(self, expandW, expandH)
-	self._layoutInnerWidth = self._layoutWidth-2*self.PADDING
-	self._layoutInnerHeight = self._layoutHeight-2*self.PADDING
+	local inputIndentation = themeGet(self._gui, 'inputIndentation')
+	self._layoutInnerWidth = self._layoutWidth-2*inputIndentation
+	self._layoutInnerHeight = self._layoutHeight-2*inputIndentation
 	self._field:setWidth(self._layoutInnerWidth)
 end
 
@@ -4616,45 +4691,37 @@ end
 local TEXT_PADDING = 1
 
 local BUTTON_PADDING = 3
-local BUTTON_ARROW
-local BUTTON_ARROW_LENGTH = 3
 local BUTTON_IMAGE_SPACING, BUTTON_TEXT_SPACING = 3, 6
-do
-	local dat = love.image.newImageData(BUTTON_ARROW_LENGTH, 5)
-	dat:setPixel(0,0,255,255,255,255); dat:setPixel(1,0,255,255,255,  0); dat:setPixel(2,0,255,255,255,  0);
-	dat:setPixel(0,1,255,255,255,255); dat:setPixel(1,1,255,255,255,255); dat:setPixel(2,1,255,255,255,  0);
-	dat:setPixel(0,2,255,255,255,255); dat:setPixel(1,2,255,255,255,255); dat:setPixel(2,2,255,255,255,255);
-	dat:setPixel(0,3,255,255,255,255); dat:setPixel(1,3,255,255,255,255); dat:setPixel(2,3,255,255,255,  0);
-	dat:setPixel(0,4,255,255,255,255); dat:setPixel(1,4,255,255,255,  0); dat:setPixel(2,4,255,255,255,  0);
-	BUTTON_ARROW = LG.newImage(dat)
-	BUTTON_ARROW:setFilter('nearest', 'nearest')
-end
+local BUTTON_ARROW = Gui.newMonochromeImage{
+	'F  ',
+	'FF ',
+	'FFF',
+	'FF ',
+	'F  ',
+}; BUTTON_ARROW:setFilter('nearest', 'nearest')
+local BUTTON_ARROW_LENGTH = BUTTON_ARROW:getWidth()
 
 local INPUT_PADDING = 4
 
 defaultTheme = {
+	inputIndentation = INPUT_PADDING, -- Affects mouse interactions and input field scrolling.
 
 	----------------------------------------------------------------
 
 	size = {
 
-		-- size.canvas( element, canvasWidth, canvasHeight )
-		['canvas'] = function(el, cw, ch)
-			return cw, ch
-		end,
-
-		-- size.image( element, imageWidth, imageHeight )
-		['image'] = function(el, iw, ih)
+		-- size.image( imageElement, imageWidth, imageHeight )
+		['image'] = function(imageEl, iw, ih)
 			return iw, ih
 		end,
 
-		-- size.text( element, textWidth, textHeight )
-		['text'] = function(el, textW, textH)
+		-- size.text( textElement, textWidth, textHeight )
+		['text'] = function(textEl, textW, textH)
 			return textW+2*TEXT_PADDING, textH+2*TEXT_PADDING
 		end,
 
-		-- size.button( element, text1Width, text2Width, textHeight, imageWidth, isHovered )
-		['button'] = function(el, text1W, text2W, textH, iw, ih, imagePadding)
+		-- size.button( buttonElement, text1Width, text2Width, textHeight, imageWidth, isHovered )
+		['button'] = function(button, text1W, text2W, textH, iw, ih, imagePadding)
 			local textW = text1W+(text2W > 0 and BUTTON_TEXT_SPACING+text2W or 0)
 			local w, h
 
@@ -4675,15 +4742,15 @@ defaultTheme = {
 
 			end
 
-			local arrow = el:getArrow()
+			local arrow = button:getArrow()
 			w = w+((arrow == 'left' or arrow == 'right') and BUTTON_ARROW_LENGTH or 0)
 			h = h+((arrow == 'up'   or arrow == 'down' ) and BUTTON_ARROW_LENGTH or 0)
 
 			return w, h
 		end,
 
-		-- size.input( element, _, valueHeight )
-		['input'] = function(el, _, valueHeight)
+		-- size.input( inputElement, _, valueHeight )
+		['input'] = function(input, _, valueHeight)
 			return 0, valueHeight+2*INPUT_PADDING -- Only the returned height is used.
 		end,
 
@@ -4693,8 +4760,10 @@ defaultTheme = {
 
 	draw = {
 
-		-- draw.image( element, width, height, image, imageWidth, imageHeight, imageScaleX, imageScaleY, imageColor, imageBackgroundColor )
-		['image'] = function(el, w, h, image, quad, iw, ih, sx, sy, imageColor, imageBgColor)
+		-- draw.image(
+		--    imageElement, width, height, image, imageWidth, imageHeight, imageScaleX, imageScaleY,
+		--    imageColor, imageBackgroundColor )
+		['image'] = function(imageEl, w, h, image, quad, iw, ih, sx, sy, imageColor, imageBgColor)
 
 			if not image then  return  end
 
@@ -4711,8 +4780,8 @@ defaultTheme = {
 
 		end,
 
-		-- draw.text( element, width, height, text, textWidth, textHeight, wrapLimit, align, textColor )
-		['text'] = function(el, w, h, text, textW, textH, wrapLimit, align, textColor)
+		-- draw.text( textElement, width, height, text, textWidth, textHeight, wrapLimit, align, textColor )
+		['text'] = function(textEl, w, h, text, textW, textH, wrapLimit, align, textColor)
 
 			local textX
 			if (align == 'left' or wrapLimit) then
@@ -4724,7 +4793,7 @@ defaultTheme = {
 			end
 			local textY = math.floor((h-textH)/2)
 
-			el:setScissor(0, 0, w, h) -- Make sure text does not render outside the element.
+			textEl:setScissor(0, 0, w, h) -- Make sure text does not render outside the element.
 			LG.setColor(textColor)
 			if wrapLimit then
 				LG.printf(text, textX, textY, wrapLimit, align)
@@ -4735,17 +4804,17 @@ defaultTheme = {
 		end,
 
 		-- draw.button(
-		--    element, width, height, text1, text2, text1Width, text2Width, textHeight, align,
+		--    buttonElement, width, height, text1, text2, text1Width, text2Width, textHeight, align,
 		--    image, quad, imageWidth, isHovered, imageScaleX, imageScaleY, imageColor, imageBackgroundColor,
 		--    imagePadding )
 		-- Tags: normal, highlight, negative, blend
 		['button'] = function(
-			el, w, h, text1, text2, text1W, text2W, textH, align,
+			button, w, h, text1, text2, text1W, text2W, textH, align,
 			image, quad, iw, ih, sx, sy, imageColor, imageBgColor, imagePadding
 		)
 
 			-- Exclude any arrow from our position and dimensions.
-			local arrow = el:getArrow()
+			local arrow = button:getArrow()
 			local x, y = 0, 0
 			if arrow then
 				if     arrow == 'right' then
@@ -4763,15 +4832,15 @@ defaultTheme = {
 
 			local midX, midY = x+math.floor(w/2), y+math.floor(h/2)
 			local textY = midY-math.floor(textH/2)
-			local opacity = (el:isActive() and 1 or 0.3)
+			local opacity = (button:isActive() and 1 or 0.3)
 
-			local isHovered = (el:isActive() and el:isHovered(true))
+			local isHovered = (button:isActive() and button:isHovered(true))
 
 			local r, g, b = 255, 255, 255
-			if el:isToggled() then
+			if button:isToggled() then
 				r, g, b = 100, 200, 255
 			end
-			if (el:isPressed() and isHovered) then
+			if (button:isPressed() and isHovered) then
 				r, g, b = r*0.6, g*0.6, b*0.6
 			end
 
@@ -4780,7 +4849,7 @@ defaultTheme = {
 			LG.rectangle('fill', x+1, y+1, w-2, h-2)
 
 			-- Arrow
-			if (arrow and el:isToggled()) then
+			if (arrow and button:isToggled()) then
 				local arrLen = BUTTON_ARROW_LENGTH
 				LG.setColor(255, 255, 255)
 				if     arrow == 'right' then  LG.draw(BUTTON_ARROW, x+(w-1),        y+(h-arrLen)/2, 0*tau/4)
@@ -4790,7 +4859,7 @@ defaultTheme = {
 				end
 			end
 
-			el:setScissor(x+2, y+2, w-2*2, h-2*2)
+			button:setScissor(x+2, y+2, w-2*2, h-2*2) -- Make sure the contents does not render outside the element.
 
 			-- Only image.
 			-- @Incomplete: Support 'align' for no-text image buttons.
@@ -4833,9 +4902,9 @@ defaultTheme = {
 				LG.setColor(255, 255, 255, 255*opacity)
 				LG.print(text1, text1X, textY)
 
-				local mnemonicPos = el:getMnemonicPosition()
+				local mnemonicPos = button:getMnemonicPosition()
 				if mnemonicPos then
-					local font = el:getFont()
+					local font = button:getFont()
 					local mnemonicX1 = text1X+font:getWidth(text1:sub(1, mnemonicPos-1))-1
 					local mnemonicX2 = text1X+font:getWidth(text1:sub(1, mnemonicPos))
 					LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
@@ -4868,9 +4937,9 @@ defaultTheme = {
 					LG.print(text2, text2X, textY)
 				end
 
-				local mnemonicPos = el:getMnemonicPosition()
+				local mnemonicPos = button:getMnemonicPosition()
 				if mnemonicPos then
-					local font = el:getFont()
+					local font = button:getFont()
 					local mnemonicX1 = text1X+font:getWidth(text1:sub(1, mnemonicPos-1))-1
 					local mnemonicX2 = text1X+font:getWidth(text1:sub(1, mnemonicPos))
 					LG.rectangle('fill', mnemonicX1, textY+font:getHeight(), mnemonicX2-mnemonicX1, 1)
@@ -4880,27 +4949,27 @@ defaultTheme = {
 
 		end,
 
-		-- draw.input( element, width, height, value, valueHeight )
-		['input'] = function(el, w, h, v, valueH)
-			local field = el:getField()
+		-- draw.input( inputElement, width, height, value, valueHeight )
+		['input'] = function(input, w, h, v, valueH)
+			local field = input:getField()
 			local textY = math.floor((h-valueH)/2)
-			local opacity = (el:isActive() and 1 or 0.3)
+			local opacity = (input:isActive() and 1 or 0.3)
 
 			-- Background
-			if el:isKeyboardFocus() then
+			if input:isKeyboardFocus() then
 				LG.setColor(100, 255, 100, 40)
 				LG.rectangle('fill', 1, 1, w-2, h-2)
 			end
 
 			-- Border
-			local isHovered = (el:isKeyboardFocus() or el:isActive() and el:isHovered(true))
+			local isHovered = (input:isKeyboardFocus() or input:isActive() and input:isHovered(true))
 			LG.setColor(255, 255, 255, (isHovered and 255 or 100)*opacity)
 			LG.rectangle('line', 1+0.5, 1+0.5, w-2-1, h-2-1)
 
-			el:setScissor(INPUT_PADDING-1, INPUT_PADDING-1, w-2*INPUT_PADDING+2, h-2*INPUT_PADDING+2)
+			input:setScissor(2, 2, w-2*2, h-2*2) -- Make sure the contents does not render outside the element.
 
 			-- Selection
-			if el:isKeyboardFocus() then
+			if input:isKeyboardFocus() then
 				local x1, x2 = field:getSelectionOffset()
 				if x2 > x1 then
 					LG.setColor(255, 255, 255, 100)
@@ -4913,7 +4982,7 @@ defaultTheme = {
 			LG.print(v, INPUT_PADDING+field:getTextOffset(), textY)
 
 			-- Cursor
-			if el:isKeyboardFocus() then
+			if input:isKeyboardFocus() then
 				local opacity = ((math.cos(5*field:getBlinkPhase())+1)/2)^0.5
 				LG.setColor(255, 255, 255, 255*opacity)
 				LG.rectangle('fill', INPUT_PADDING+field:getCursorOffset()-1, textY, 1, valueH)

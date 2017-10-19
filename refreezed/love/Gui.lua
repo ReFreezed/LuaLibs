@@ -40,6 +40,8 @@
 --=
 --==============================================================
 
+	STATIC  create9PartQuads
+	STATIC  draw9PartScaled
 	STATIC  newMonochromeImage, newImageUsingPalette
 
 	update
@@ -256,6 +258,7 @@ local applyStyle
 local checkValidSoundKey
 local copyTable
 local coroutineIterator, newIteratorCoroutine
+local drawImage
 local drawLayoutBackground
 local errorf, assertArg
 local F
@@ -341,6 +344,19 @@ do
 		local co = coroutine.create(initiator)
 		coroutine.resume(co, cb, ...)
 		return coroutineIterator, co
+	end
+end
+
+
+
+-- drawImage( image, quad, ... )
+-- drawImage( image, nil, ... )
+-- drawImage( nil, image, ... )
+function drawImage(image, quadOrImage, ...)
+	if image and quadOrImage then
+		LG.draw(image, quadOrImage, ...)
+	else
+		LG.draw((image or quadOrImage), ...)
 	end
 end
 
@@ -811,6 +827,76 @@ end
 --==============================================================
 --= Utilities / Static GUI Methods =============================
 --==============================================================
+
+
+
+-- quads = create9PartQuads( image, leftMargin, topMargin [, rightMargin=leftMargin, bottomMargin=rightMargin ] )
+-- quads = {
+--    topLeftQuad,    topCenterQuad,    topRightQuad,
+--    middleLeftQuad, middleCenterQuad, middleRightQuad,
+--    bottomLeftQuad, bottomCenterQuad, bottomRightQuad }
+function Gui.create9PartQuads(image, l, t, r, b)
+	r = (r or l)
+	b = (b or t)
+	local iw, ih = image:getDimensions()
+	return {
+		LG.newQuad(  0,    0,     l,      t,       iw, ih ),
+		LG.newQuad(  l,    0,     iw-l-r, t,       iw, ih ),
+		LG.newQuad(  iw-r, 0,     r,      t,       iw, ih ),
+		LG.newQuad(  0,    t,     l,      ih-t-b,  iw, ih ),
+		LG.newQuad(  l,    t,     iw-l-r, ih-t-b,  iw, ih ),
+		LG.newQuad(  iw-r, t,     r,      ih-t-b,  iw, ih ),
+		LG.newQuad(  0,    ih-b,  l,      b,       iw, ih ),
+		LG.newQuad(  l,    ih-b,  iw-l-r, b,       iw, ih ),
+		LG.newQuad(  iw-r, ih-b,  r,      b,       iw, ih ),
+	}
+end
+
+
+
+-- draw9PartScaled(
+--    x, y, width, height,
+--    topLeftImage,    topCenterImage,    topRightImage,
+--    middleLeftImage, middleCenterImage, middleRightImage,
+--    bottomLeftImage, bottomCenterImage, bottomRightImage )
+-- draw9PartScaled(
+--    x, y, width, height, image,
+--    topLeftQuad,    topCenterQuad,    topRightQuad,
+--    middleLeftQuad, middleCenterQuad, middleRightQuad,
+--    bottomLeftQuad, bottomCenterQuad, bottomRightQuad )
+function Gui.draw9PartScaled(x, y, w, h, image, tlObj, tcObj, trObj, clObj, ccObj, crObj, blObj, bcObj, brObj)
+	if not brObj then
+		image, tlObj, tcObj, trObj, clObj, ccObj, crObj, blObj, bcObj, brObj
+			= nil, image, tlObj, tcObj, trObj, clObj, ccObj, crObj, blObj, bcObj
+	end
+
+	local t = image and select(4, tcObj:getViewport()) or tcObj:getHeight()
+	local l = image and select(3, clObj:getViewport()) or clObj:getWidth()
+	local r = image and select(3, crObj:getViewport()) or crObj:getWidth()
+	local b = image and select(4, bcObj:getViewport()) or bcObj:getHeight()
+	local sx = (w-l-r)/(image and select(3, tcObj:getViewport()) or tcObj:getWidth())
+	local sy = (h-t-b)/(image and select(4, clObj:getViewport()) or clObj:getHeight())
+
+	LG.push('all')
+	LG.translate(x, y)
+
+	-- Fill
+	drawImage(image, ccObj, l, t, 0, sx, sy)
+
+	-- Sides
+	drawImage(image, tcObj, l,   0,   0, sx, 1)
+	drawImage(image, crObj, w-r, t,   0, 1,  sy)
+	drawImage(image, bcObj, l,   h-b, 0, sx, 1)
+	drawImage(image, clObj, 0,   t,   0, 1,  sy)
+
+	-- Corners
+	drawImage(image, tlObj, 0,   0)
+	drawImage(image, trObj, w-r, 0)
+	drawImage(image, blObj, 0,   h-b)
+	drawImage(image, brObj, w-r, h-b)
+
+	LG.pop()
+end
 
 
 
@@ -4698,8 +4784,26 @@ local BUTTON_ARROW = Gui.newMonochromeImage{
 	'FFF',
 	'FF ',
 	'F  ',
-}; BUTTON_ARROW:setFilter('nearest', 'nearest')
+}
 local BUTTON_ARROW_LENGTH = BUTTON_ARROW:getWidth()
+local BUTTON_BG = Gui.newMonochromeImage{
+	' FFF ',
+	'FFFFF',
+	'FFFFF',
+	'FFFFF',
+	' FFF ',
+}
+local BUTTON_BG_QUADS = Gui.create9PartQuads(BUTTON_BG, 2, 2)
+local NAV = Gui.newMonochromeImage{
+	'  FFF  ',
+	' F222F ',
+	'F22222F',
+	'F22222F',
+	'F22222F',
+	' F222F ',
+	'  FFF  ',
+}
+local NAV_QUADS = Gui.create9PartQuads(NAV, 3, 3)
 
 local INPUT_PADDING = 4
 
@@ -4846,16 +4950,16 @@ defaultTheme = {
 
 			-- Background
 			LG.setColor(r, g, b, (isHovered and 70 or 50)*opacity)
-			LG.rectangle('fill', x+1, y+1, w-2, h-2)
+			Gui.draw9PartScaled(x+1, y+1, w-2, h-2, BUTTON_BG, unpack(BUTTON_BG_QUADS))
 
 			-- Arrow
 			if (arrow and button:isToggled()) then
-				local arrLen = BUTTON_ARROW_LENGTH
+				local image, arrLen, floor = BUTTON_ARROW, BUTTON_ARROW_LENGTH, math.floor
 				LG.setColor(255, 255, 255)
-				if     arrow == 'right' then  LG.draw(BUTTON_ARROW, x+(w-1),        y+(h-arrLen)/2, 0*tau/4)
-				elseif arrow == 'down'  then  LG.draw(BUTTON_ARROW, x+(w+arrLen)/2, y+(h-1),        1*tau/4)
-				elseif arrow == 'left'  then  LG.draw(BUTTON_ARROW, x+(1),          y+(h+arrLen)/2, 2*tau/4)
-				elseif arrow == 'up'    then  LG.draw(BUTTON_ARROW, x+(w-arrLen)/2, y+(1),          3*tau/4)
+				if     arrow == 'right' then  LG.draw(image, x+(w-1),               y+floor((h-arrLen)/2), 0*tau/4)
+				elseif arrow == 'down'  then  LG.draw(image, x+floor((w+arrLen)/2), y+(h-1),               1*tau/4)
+				elseif arrow == 'left'  then  LG.draw(image, x+(1),                 y+floor((h+arrLen)/2), 2*tau/4)
+				elseif arrow == 'up'    then  LG.draw(image, x+floor((w-arrLen)/2), y+(1),                 3*tau/4)
 				end
 			end
 
@@ -4869,14 +4973,14 @@ defaultTheme = {
 					local r, g, b, a = unpack(imageBgColor)
 					LG.setColor(r, g, b, a*opacity)
 					LG.rectangle(
-						'fill', midX-iw/2-imagePadding, midY-ih/2-imagePadding,
+						'fill', math.floor(midX-iw/2-imagePadding), math.floor(midY-ih/2-imagePadding),
 						iw+2*imagePadding, ih+2*imagePadding)
 				end
 
 				do
 					local r, g, b, a = unpack(imageColor)
 					LG.setColor(r, g, b, a*opacity)
-					LG.draw(image, quad, midX-iw/2, midY-ih/2, 0, sx, sy)
+					LG.draw(image, quad, math.floor(midX-iw/2), math.floor(midY-ih/2), 0, sx, sy)
 				end
 
 			-- Only text.
@@ -4917,7 +5021,7 @@ defaultTheme = {
 					local r, g, b, a = unpack(imageBgColor)
 					LG.setColor(r, g, b, a*opacity)
 					LG.rectangle(
-						'fill', x+BUTTON_PADDING, midY-ih/2-imagePadding,
+						'fill', x+BUTTON_PADDING, math.floor(midY-ih/2-imagePadding),
 						iw+2*imagePadding, ih+2*imagePadding)
 				end
 
@@ -4927,7 +5031,7 @@ defaultTheme = {
 				do
 					local r, g, b, a = unpack(imageColor)
 					LG.setColor(r, g, b, a*opacity)
-					LG.draw(image, quad, x+BUTTON_PADDING+imagePadding, midY-ih/2, 0, sx, sy)
+					LG.draw(image, quad, x+BUTTON_PADDING+imagePadding, math.floor(midY-ih/2), 0, sx, sy)
 				end
 
 				LG.setColor(255, 255, 255, 255*opacity)
@@ -4996,10 +5100,8 @@ defaultTheme = {
 			local x, y = -offset, -offset
 			w, h = w+2*offset, h+2*offset
 
-			LG.setColor(255, 255, 0, 40)
-			LG.rectangle('fill', x+1, y+1, w-2, h-2)
 			LG.setColor(255, 255, 0, 255)
-			LG.rectangle('line', x+0.5, y+0.5, w-1, h-1)
+			Gui.draw9PartScaled(x, y, w, h, NAV, unpack(NAV_QUADS))
 
 		end,
 

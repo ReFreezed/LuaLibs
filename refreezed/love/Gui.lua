@@ -363,33 +363,10 @@ end
 
 
 -- drawLayoutBackground( element )
--- @Incomplete: Move layout backgrounds to themes.
 function drawLayoutBackground(el)
 	local bg = el._background
-	if not bg then  return  end
-
-	local x, y = el._layoutX+el._layoutOffsetX, el._layoutY+el._layoutOffsetY
-	local w, h = el._layoutWidth, el._layoutHeight
-
-	if bg == 'shadow' then
-		LG.setColor(0, 0, 0, 150)
-		LG.rectangle('fill', x, y, w, h)
-
-	elseif bg == 'header' then
-		LG.setColor(255, 255, 255, 50)
-		LG.rectangle('fill', x, y, w, h)
-
-	elseif bg == 'cover' then
-		LG.setColor(40, 40, 40, 240)
-		LG.rectangle('fill', x, y, w, h)
-
-	elseif bg == 'warning' then
-		LG.setColor(188, 58, 41, 180)
-		LG.rectangle('fill', x, y, w, h)
-
-	else
-		errorf('Bad layout background name %q.', bg)
-
+	if bg then
+		themeRender(el, 'background', bg)
 	end
 end
 
@@ -966,9 +943,14 @@ end
 
 -- Gui( )
 function Gui:init()
+
 	self._defaultSounds = {}
 	self._mouseFocusSet = {}
-	self._styles = {}
+
+	self._styles = {
+		['_MENU'] = {},
+	}
+
 end
 
 
@@ -1707,7 +1689,7 @@ end
 
 Cs.element = newClass('GuiElement', {
 
-	MENU_PADDING = 0,
+	MENU_PADDING = 3,
 
 	_callbacks = nil,
 	_gui = nil,
@@ -2742,8 +2724,8 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 
 	-- Create menu.
 	local menu = root:insert{
-		type='container', expandX=true, expandY=true, background='cover', closable=true, captureGuiInput=true,
-		[1] = {type='vbar', id='_buttons', background='shadow', padding=padding, maxHeight=root:getHeight()},
+		type='container', style='_MENU', expandX=true, expandY=true, closable=true, captureGuiInput=true,
+		[1] = {type='vbar', padding=padding, maxHeight=root:getHeight()},
 	}
 	menu:setCallback('closed', function(button, event)
 		if cb then
@@ -2756,7 +2738,7 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 	end)
 
 	-- Add menu items.
-	local buttons = menu:find('_buttons')
+	local buttons = menu[1]
 	for i, text in ipairs(items) do
 		local text2 = nil
 		if type(text) == 'table' then
@@ -4771,7 +4753,7 @@ end
 
 
 --==============================================================
---==============================================================
+--= Default Theme ==============================================
 --==============================================================
 
 local TEXT_PADDING = 1
@@ -4794,6 +4776,7 @@ local BUTTON_BG = Gui.newMonochromeImage{
 	' FFF ',
 }
 local BUTTON_BG_QUADS = Gui.create9PartQuads(BUTTON_BG, 2, 2)
+
 local NAV = Gui.newMonochromeImage{
 	'  FFF  ',
 	' F222F ',
@@ -4814,16 +4797,19 @@ defaultTheme = {
 
 	size = {
 
+		-- Image element.
 		-- size.image( imageElement, imageWidth, imageHeight )
 		['image'] = function(imageEl, iw, ih)
 			return iw, ih
 		end,
 
+		-- Text element.
 		-- size.text( textElement, textWidth, textHeight )
 		['text'] = function(textEl, textW, textH)
 			return textW+2*TEXT_PADDING, textH+2*TEXT_PADDING
 		end,
 
+		-- Button element.
 		-- size.button( buttonElement, text1Width, text2Width, textHeight, imageWidth, isHovered )
 		['button'] = function(button, text1W, text2W, textH, iw, ih, imagePadding)
 			local textW = text1W+(text2W > 0 and BUTTON_TEXT_SPACING+text2W or 0)
@@ -4853,6 +4839,7 @@ defaultTheme = {
 			return w, h
 		end,
 
+		-- Input element.
 		-- size.input( inputElement, _, valueHeight )
 		['input'] = function(input, _, valueHeight)
 			return 0, valueHeight+2*INPUT_PADDING -- Only the returned height is used.
@@ -4864,11 +4851,26 @@ defaultTheme = {
 
 	draw = {
 
+		-- Background of any element.
+		-- draw.background( element, width, height, background )
+		['background'] = function(el, w, h, bg)
+
+			if bg == 'warning' then
+				LG.setColor(100, 0, 0, 255)
+				LG.rectangle('fill', 0, 0, w, h)
+
+			else
+				LG.setColor(30, 30, 30, 200)
+				LG.rectangle('fill', 0, 0, w, h)
+
+			end
+		end,
+
+		-- Image element.
 		-- draw.image(
 		--    imageElement, width, height, image, imageWidth, imageHeight, imageScaleX, imageScaleY,
 		--    imageColor, imageBackgroundColor )
 		['image'] = function(imageEl, w, h, image, quad, iw, ih, sx, sy, imageColor, imageBgColor)
-
 			if not image then  return  end
 
 			local x = math.floor((w-iw)/2)
@@ -4884,6 +4886,7 @@ defaultTheme = {
 
 		end,
 
+		-- Text element.
 		-- draw.text( textElement, width, height, text, textWidth, textHeight, wrapLimit, align, textColor )
 		['text'] = function(textEl, w, h, text, textW, textH, wrapLimit, align, textColor)
 
@@ -4907,6 +4910,7 @@ defaultTheme = {
 
 		end,
 
+		-- Button element.
 		-- draw.button(
 		--    buttonElement, width, height, text1, text2, text1Width, text2Width, textHeight, align,
 		--    image, quad, imageWidth, isHovered, imageScaleX, imageScaleY, imageColor, imageBackgroundColor,
@@ -5053,6 +5057,7 @@ defaultTheme = {
 
 		end,
 
+		-- Input element.
 		-- draw.input( inputElement, width, height, value, valueHeight )
 		['input'] = function(input, w, h, v, valueH)
 			local field = input:getField()
@@ -5094,6 +5099,7 @@ defaultTheme = {
 
 		end,
 
+		-- Highlight of current navigation target.
 		-- draw.navigation( element, width, height, timeSinceNavigation )
 		['navigation'] = function(el, w, h, time)
 			local offset = 10*math.max(1-time/0.1, 0)

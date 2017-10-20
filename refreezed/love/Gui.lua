@@ -12,7 +12,6 @@
 --=  - refreezed.love.Sprite (Publicly unavailable, in LuaLibs or anywhere! TO FIX!!!)
 --=
 --=  TODO:
---=  - Text preprocessing, so e.g. texts can be translated automatically.
 --=  - CSS-like selectors in styles? Also, maybe put style data in themes instead of having defineStyle()?
 --=  - Percentage sizes for elements.
 --=
@@ -92,6 +91,7 @@
 	getSoundPlayer, setSoundPlayer
 	getSpriteLoader, setSpriteLoader
 	getTarget, getTargetCallback, setTargetCallback
+	getTextPreprocessor, setTextPreprocessor, reprocessTexts
 	getTheme, setTheme
 	isBusy, isMouseBusy
 	isIgnoringKeyboardInput
@@ -181,7 +181,7 @@
 	- getAlign, setAlign
 	- getFont
 	- getMnemonicPosition
-	- getText, setText
+	- getText, getUnprocessedText, setText
 	- getTextColor, setTextColor
 	- isBold, setBold
 	- isSmall, setSmall
@@ -208,7 +208,7 @@
 			- getImageColor, setImageColor
 			- getImageDimensions
 			- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
-			- getText2, setText2
+			- getText2, getUnprocessedText2, setText2
 			- isToggled, setToggled
 			- press, isPressed
 			- setSprite
@@ -261,8 +261,9 @@ local Gui = newClass('Gui', {
 	_soundPlayer = nil,
 	_spriteLoader = nil,
 	_styles = nil,
-	_time = 0.0,
+	_textPreprocessor = nil,
 	_theme = nil,
+	_time = 0.0,
 	_tooltipTime = 0.0,
 
 	debug = false,
@@ -303,6 +304,7 @@ local getTextDimensions, getTextHeight
 local lerp
 local matchAll
 local playSound, prepareSound
+local preprocessText
 local retrieve
 local reverseArray
 local round
@@ -530,6 +532,24 @@ function prepareSound(el, soundK)
 			soundPlayer(sound)
 		end
 	end
+end
+
+
+
+-- text = preprocessText( gui, text, el )
+function preprocessText(gui, text, el)
+	if text == '' then
+		return ''
+	end
+	local preprocessor = gui._textPreprocessor
+	if not preprocessor then
+		return text
+	end
+	local processedText = preprocessor(text, el)
+	if processedText == nil then
+		return text
+	end
+	return tostring(processedText)
 end
 
 
@@ -1388,7 +1408,8 @@ Gui:define('_soundPlayer')
 
 
 
--- getSpriteLoader, setSpriteLoader
+-- spriteLoader = getSpriteLoader( )
+-- setSpriteLoader( spriteLoader )
 -- sprite = spriteLoader( spriteName )
 Gui:define('_spriteLoader')
 
@@ -1441,6 +1462,27 @@ function Gui:setTargetCallback(targetAndEvent, cb)
 	end
 	el:setCallback(event, cb)
 	return true
+end
+
+
+
+-- textPreprocessor = getTextPreprocessor( )
+-- setTextPreprocessor( textPreprocessor )
+-- text = textPreprocessor( text, element )
+Gui:define'_textPreprocessor'
+
+-- Manually re-preprocess texts. Useful if e.g. the program's language changed.
+-- reprocessTexts( )
+function Gui:reprocessTexts()
+	local root = self._root
+	if root then
+		for el in root:traverseType'leaf' do
+			el:setText(el._unprocessedText)
+			if el:is(Cs.button) then
+				el:setText2(el._unprocessedText2)
+			end
+		end
+	end
 end
 
 
@@ -3708,6 +3750,7 @@ Cs.leaf = Cs.element:extend('GuiLeaf', {
 
 	_mnemonicPosition = nil,
 	_textWidth = 0, _textHeight = 0,
+	_unprocessedText = '',
 
 	_align = 'center',
 	_bold = false, _small = false,
@@ -3726,7 +3769,7 @@ function Cs.leaf:init(gui, data, parent)
 	-- retrieve(self, data, '_text')
 	retrieve(self, data, '_textColor')
 
-	if data.text then
+	if data.text ~= nil then
 		self:setText(data.text)
 	end
 
@@ -3756,38 +3799,50 @@ end
 
 
 -- getText
-Cs.leaf:defineGet('_text')
+Cs.leaf:defineGet'_text'
+
+-- getUnprocessedText
+Cs.leaf:defineGet'_unprocessedText'
 
 -- setText( text )
 function Cs.leaf:setText(text)
+	text = tostring(text)
+
+	local unprocessedText = text
+	text = preprocessText(self._gui, text, self)
 	if self._text == text then
 		return
 	end
 
-	-- Check text for mnemonics (using "&")
+	-- Check text for mnemonics (using "&").
 	self._mnemonicPosition = nil
 	if self._mnemonics then
-		local matchCount = 0
-		text = text:gsub('()&(.)', function(pos, c)
+		local matchCount, mnemonicCount = 0, 0
+		local cleanText = text:gsub('()&(.)', function(pos, c)
 			if c ~= '&' then
-				if self._mnemonicPosition then
-					errorf('multiple mnemonics in %q', text)
+				if mnemonicCount == 0 then
+					self._mnemonicPosition = pos-matchCount
 				end
-				self._mnemonicPosition = pos-matchCount
+				mnemonicCount = mnemonicCount+1
 			end
 			matchCount = matchCount+1
 			return c
 		end)
+		if mnemonicCount > 1 then
+			print('ERROR: Multiple mnemonics in "'..text..'"')
+			print()
+		end
+		text = cleanText
 	end
 
-	-- Update text
-	local font, oldW = self:getFont(), self._textWidth
-	self._text = text
-	self._textWidth = font:getWidth(text)
+	self._text, self._unprocessedText = text, unprocessedText
 
+	local oldW = self._textWidth
+	self._textWidth = self:getFont():getWidth(text)
 	if self._textWidth ~= oldW then
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
+
 end
 
 
@@ -4197,6 +4252,7 @@ Cs.button = Cs.widget:extend('GuiButton', {
 
 	_isPressed = false,
 	_textWidth1 = 0, _textWidth2 = 0,
+	_unprocessedText2 = '',
 
 	_arrow = nil,
 	_canToggle = false,
@@ -4222,13 +4278,17 @@ function Cs.button:init(gui, data, parent)
 	retrieve(self, data, '_imageScaleX','_imageScaleY')
 	retrieve(self, data, '_imagePadding')
 	-- retrieve(self, data, '_sprite')
-	retrieve(self, data, '_text2')
+	-- retrieve(self, data, '_text2')
 	retrieve(self, data, '_toggled')
 
 	self._imageScaleX = (self._imageScaleX or data.imageScale or 1)
 	self._imageScaleY = (self._imageScaleY or data.imageScale or 1)
 
 	self:setSprite(data.sprite)
+
+	if data.text2 ~= nil then
+		self:setText2(data.text2)
+	end
 
 end
 
@@ -4342,40 +4402,51 @@ end
 
 
 -- getText2
-Cs.button:defineGet('_text2')
+Cs.button:defineGet'_text2'
+
+-- getUnprocessedText2
+Cs.leaf:defineGet'_unprocessedText2'
 
 -- OVERRIDE  setText( text )
 function Cs.button:setText(text)
-	if self._text == text then
-		return
-	end
+	local oldText = self._text
 	local oldW = self._textWidth
 
 	Cs.button.super.setText(self, text)
+	text = nil -- Don't use this anymore.
 
-	local font = self:getFont()
-	self._textWidth1 = font:getWidth(self._text)
+	if self._text == oldText then
+		return
+	end
+
+	self._textWidth1 = self._textWidth
 	self._textWidth = self._textWidth1+self._textWidth2
 
 	if self._textWidth ~= oldW then
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
+
 end
 
 -- setText2( text )
 function Cs.button:setText2(text)
+	text = tostring(text)
+
+	local unprocessedText = text
+	text = preprocessText(self._gui, text, self)
 	if self._text2 == text then
 		return
 	end
 
-	local font, oldW = self:getFont(), self._textWidth
-	self._text2 = text
-	self._textWidth2 = font:getWidth(text)
-	self._textWidth = self._textWidth1+self._textWidth2
+	self._text2, self._unprocessedText2 = text, unprocessedText
 
+	local oldW = self._textWidth
+	self._textWidth2 = self:getFont():getWidth(text)
+	self._textWidth = self._textWidth1+self._textWidth2
 	if self._textWidth ~= oldW then
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
+
 end
 
 

@@ -1,44 +1,76 @@
 --[[============================================================
 --=
---=  GUI class
+--=  GuiLove v0.1
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See the bottom of this file)
 --=
 --=  Dependencies:
 --=  - LÖVE 0.10.2
 --=  - refreezed.class
 --=  - refreezed.love.Animation (Used by Sprites.)
 --=  - refreezed.love.InputField
---=  - refreezed.love.Sprite (Unavailable in LuaLibs! TODO!!!)
---=
---=-------------------------------------------------------------
---=
---=  MIT License
---=
---=  Copyright © 2017 Marcus 'ReFreezed' Thunström
---=
---=  Permission is hereby granted, free of charge, to any person obtaining a copy
---=  of this software and associated documentation files (the "Software"), to deal
---=  in the Software without restriction, including without limitation the rights
---=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
---=  copies of the Software, and to permit persons to whom the Software is
---=  furnished to do so, subject to the following conditions:
---=
---=  The above copyright notice and this permission notice shall be included in all
---=  copies or substantial portions of the Software.
---=
---=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
---=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
---=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
---=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
---=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
---=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
---=  SOFTWARE.
---=
---=-------------------------------------------------------------
+--=  - refreezed.love.Sprite (Publicly unavailable, in LuaLibs or anywhere! TO FIX!!!)
 --=
 --=  TODO:
+--=  - Text preprocessing, so e.g. texts can be translated automatically.
+--=  - CSS-like selectors in styles? Also, maybe put style data in themes instead of having defineStyle()?
 --=  - Percentage sizes for elements.
 --=
 --==============================================================
+
+
+
+	Basic usage
+	----------------------------------------------------------------
+
+	function love.load()
+		local Gui = require("Gui")
+		gui = Gui()
+
+		gui:load{ type="root",
+			{type="vbar", id="myContainer", width=200,
+				{type="text", text="I'm just a text."},
+				{type="button", id="myButton", text="Press Me!"},
+			},
+		}
+
+		local myButton = gui:find("myButton")
+		local pressCount = 0
+		myButton:setCallback("press", function(myButton, event)
+
+			pressCount = pressCount+1
+
+			local myContainer = gui:find("myContainer")
+			myContainer:insert{ type="text", text="Pressed button "..pressCount.." time(s)!" }
+
+		end)
+
+		gui:getRoot():setDimensions(love.graphics.getDimensions())
+
+	end
+
+	function love.mousepressed(x, y, mouseButton)
+		gui:mouseDown(x, y, mouseButton)
+	end
+	function love.mousemoved(dx, dy)
+		gui:mouseMove(dx, dy)
+	end
+	function love.mousereleased(x, y, mouseButton)
+		gui:mouseUp(x, y, mouseButton)
+	end
+
+	function love.update(dt)
+		gui:update(dt)
+	end
+
+	function love.draw()
+		gui:draw()
+	end
+
+
+
+	Gui methods
+	----------------------------------------------------------------
 
 	STATIC  create9PartQuads
 	STATIC  draw9PartScaled
@@ -70,7 +102,10 @@
 	ok, back
 	updateLayout
 
-----------------------------------------------------------------
+
+
+	Element types, methods and events
+	----------------------------------------------------------------
 
 	(element)
 	- close, canClose
@@ -186,6 +221,8 @@
 			- isPasswordActive, setPasswordActive
 			- Event: change
 			- Event: submit
+
+
 
 --============================================================]]
 
@@ -5122,3 +5159,29 @@ defaultTheme = {
 --==============================================================
 
 return Gui
+
+--==============================================================
+--=
+--=  MIT License
+--=
+--=  Copyright © 2017 Marcus 'ReFreezed' Thunström
+--=
+--=  Permission is hereby granted, free of charge, to any person obtaining a copy
+--=  of this software and associated documentation files (the "Software"), to deal
+--=  in the Software without restriction, including without limitation the rights
+--=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+--=  copies of the Software, and to permit persons to whom the Software is
+--=  furnished to do so, subject to the following conditions:
+--=
+--=  The above copyright notice and this permission notice shall be included in all
+--=  copies or substantial portions of the Software.
+--=
+--=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+--=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+--=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+--=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+--=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+--=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+--=  SOFTWARE.
+--=
+--==============================================================

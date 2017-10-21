@@ -80,7 +80,7 @@
 
 	blur
 	defineStyle
-	find, findAll, findActive, findToggled
+	find, findAll, findActive, findToggled, match, matchAll
 	getDefaultSound, setDefaultSound
 	getElementAt
 	getFont, setFont, getBoldFont, setBoldFont, getSmallFont, setSmallFont
@@ -152,7 +152,7 @@
 	- Event: update
 
 	container
-	- find, findAll, findActive, findToggled
+	- find, findAll, findActive, findToggled, match, matchAll
 	- get, children
 	- getChildWithData
 	- getElementAt
@@ -303,6 +303,7 @@ local F
 local getTextDimensions, getTextHeight
 local lerp
 local matchAll
+local parseSelector, isElementMatchingSelectorPath
 local playSound, prepareSound
 local preprocessText
 local retrieve
@@ -507,6 +508,146 @@ function matchAll(s, pat)
 		matches[i] = match
 	end
 	return matches
+end
+
+
+
+-- selectorPath = parseSelector( selector )
+-- selector = "elementtype #id .tag"
+-- Returns nil if the selector is empty or invalid.
+do
+	local selPathCache = {}
+
+	function parseSelector(selector)
+
+		local selPath = selPathCache[selector]
+		if selPath then
+			return selPath
+		end
+
+		selPath = {}
+
+		for section in selector:gmatch'[^ ]+' do
+			local selPathSection = {}
+			local i = 1
+			while true do
+
+				local c = section:sub(i, i)
+				if c == '' then
+					break
+				end
+
+				local selPathSegment
+
+				-- ID
+				if c == '#' then
+					local id
+					id, i = section:match('^([^#.]+)()', i+1)
+					if not id then
+						print('ERROR: Bad format in selector at "'..section:sub(i)..'".')
+						return nil
+					end
+					selPathSegment = {type='id', value=id}
+
+				-- Tag
+				elseif c == '.' then
+					local tag
+					tag, i = section:match('^([^#.]+)()', i+1)
+					if not tag then
+						print('ERROR: Bad format in selector at "'..section:sub(i)..'".')
+						return nil
+					end
+					selPathSegment = {type='tag', value=tag}
+
+				-- Element type
+				else
+					local elType
+					elType, i = section:match('^([^#.]+)()', i)
+					if not elType then
+						print('ERROR: Bad format in selector at "'..section:sub(i)..'".')
+						return nil
+					elseif not Cs[elType] then
+						print('ERROR: Invalid element type "'..elType..'" in selector.')
+						return nil
+					end
+					selPathSegment = {type='type', value=elType}
+
+				end
+				table.insert(selPathSection, selPathSegment)
+			end
+			table.insert(selPath, selPathSection)
+		end
+
+		if not selPath[1] then
+			return nil -- The selector was either empty or filled with just spaces.
+		end
+
+		selPathCache[selector] = selPath
+
+		return selPath
+	end
+
+end
+
+-- result = isElementMatchingSelectorPath( element, selectorPath )
+do
+	local function isMatchingSection(el, selPathSection)
+		for i, selPathSegment in ipairs(selPathSection) do
+
+			-- ID
+			if selPathSegment.type == 'id' then
+				if not el:hasId(selPathSegment.value) then
+					return false
+				end
+
+			-- Tag
+			elseif selPathSegment.type == 'tag' then
+				if not el:hasTag(selPathSegment.value) then
+					return false
+				end
+
+			-- Element type
+			else--if selPathSegment.type == 'type' then
+				if not el:isType(selPathSegment.value) then
+					return false
+				end
+
+			end
+		end
+		return true
+	end
+
+	function isElementMatchingSelectorPath(el, selPath)
+		local i = #selPath
+
+		local selPathSection = selPath[i]
+		if not selPathSection then
+			return false -- An empty path means nothing can match!
+		end
+
+		if not isMatchingSection(el, selPathSection) then
+			return false
+		end
+
+		i = i-1
+		selPathSection = selPath[i]
+		if not selPathSection then
+			return true -- The whole path (with only one section) matched.
+		end
+
+		for _, parent in el:parents() do
+			if isMatchingSection(parent, selPathSection) then
+				i = i-1
+				selPathSection = selPath[i]
+				if not selPathSection then
+					return true -- The whole path matched.
+				end
+			end
+		end
+
+		return false
+	end
+
 end
 
 
@@ -1133,6 +1274,24 @@ end
 function Gui:findToggled()
 	local root = self._root
 	return (root and root:findToggled())
+end
+
+-- element = match( selector )
+function Gui:match(selector)
+	local root = self._root
+	if root then
+		return root:match(selector)
+	end
+	return nil
+end
+
+-- elements = matchAll( selector )
+function Gui:matchAll(selector)
+	local root = self._root
+	if root then
+		return root:matchAll(selector)
+	end
+	return {}
 end
 
 
@@ -3019,6 +3178,38 @@ function Cs.container:findToggled()
 	return nil
 end
 
+-- element = match( selector )
+function Cs.container:match(selector)
+
+	local selPath = parseSelector(selector)
+	if not selPath then  return nil  end
+
+	for el in self:traverse() do
+		if isElementMatchingSelectorPath(el, selPath) then
+			return el
+		end
+	end
+
+	return nil
+end
+
+-- elements = matchAll( selector )
+function Cs.container:matchAll(selector)
+
+	local elements = {}
+	local selPath = parseSelector(selector)
+
+	if selPath then
+		for el in self:traverse() do
+			if isElementMatchingSelectorPath(el, selPath) then
+				table.insert(elements, el)
+			end
+		end
+	end
+
+	return elements
+end
+
 
 
 -- getMaxWidth
@@ -3829,8 +4020,7 @@ function Cs.leaf:setText(text)
 			return c
 		end)
 		if mnemonicCount > 1 then
-			print('ERROR: Multiple mnemonics in "'..text..'"')
-			print()
+			print('ERROR: Multiple mnemonics in "'..text..'".')
 		end
 		text = cleanText
 	end

@@ -885,7 +885,13 @@ end
 -- Note: Sprite batches are ignored for non-simple sprites when drawing.
 -- Note: There's no internal check that the same image is used for the sprite as for the batch.
 function Sprite:setSpriteBatch(batch)
-	assertarg(1, batch, 'userdata')
+	assertarg(1, batch, 'userdata','nil')
+
+	if not batch then
+		-- Note: It's not possible to actually remove ourselves from the batch's internal sprite list.
+		self._spriteBatch, self._idInSpriteBatch = nil, nil
+		return nil
+	end
 
 	if self._spriteBatch then
 		printerror(2, 'Sprite %q is already in a batch (%s).', self._name, self._spriteBatch)

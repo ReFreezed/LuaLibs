@@ -1,34 +1,12 @@
 --[[============================================================
 --=
---=  InputField class
+--=  InputField class v1.0
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See the bottom of this file)
 --=
 --=  Dependencies:
 --=  - LÖVE 0.10.2
 --=  - refreezed.class
---=
---=-------------------------------------------------------------
---=
---=  MIT License
---=
---=  Copyright © 2017 Marcus 'ReFreezed' Thunström
---=
---=  Permission is hereby granted, free of charge, to any person obtaining a copy
---=  of this software and associated documentation files (the "Software"), to deal
---=  in the Software without restriction, including without limitation the rights
---=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
---=  copies of the Software, and to permit persons to whom the Software is
---=  furnished to do so, subject to the following conditions:
---=
---=  The above copyright notice and this permission notice shall be included in all
---=  copies or substantial portions of the Software.
---=
---=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
---=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
---=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
---=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
---=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
---=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
---=  SOFTWARE.
 --=
 --==============================================================
 
@@ -67,8 +45,10 @@
 
 
 -- Modules
-local utf8 = require('utf8') -- (LÖVE)
-local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- (parent folder)
+local utf8 = require'utf8' -- LÖVE.
+local newClass = require(
+	(...) :gsub('%.init$', '') :gsub('%.%w+%.%w+$', '') .. '.class' -- Parent folder.
+)
 local LS = love.system
 local LT = love.timer
 
@@ -449,12 +429,12 @@ end
 
 
 -- getFont, setFont
-InputField:define('_font')
+InputField:def'_font'
 
 
 
 -- getScroll
-InputField:defineGet('_scroll')
+InputField:defget'_scroll'
 
 -- setScroll( scroll )
 function InputField:setScroll(scroll)
@@ -496,7 +476,7 @@ end
 
 
 -- getText
-InputField:defineGet('_text')
+InputField:defget'_text'
 
 -- setText( text )
 function InputField:setText(text)
@@ -547,7 +527,7 @@ end
 
 
 -- getWidth, setWidth
-InputField:define('_width')
+InputField:def'_width'
 
 
 
@@ -841,3 +821,29 @@ end
 --==============================================================
 
 return InputField
+
+--==============================================================
+--=
+--=  MIT License
+--=
+--=  Copyright © 2017 Marcus 'ReFreezed' Thunström
+--=
+--=  Permission is hereby granted, free of charge, to any person obtaining a copy
+--=  of this software and associated documentation files (the "Software"), to deal
+--=  in the Software without restriction, including without limitation the rights
+--=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+--=  copies of the Software, and to permit persons to whom the Software is
+--=  furnished to do so, subject to the following conditions:
+--=
+--=  The above copyright notice and this permission notice shall be included in all
+--=  copies or substantial portions of the Software.
+--=
+--=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+--=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+--=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+--=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+--=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+--=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+--=  SOFTWARE.
+--=
+--==============================================================

@@ -35,7 +35,7 @@
 
 		local myButton = gui:find("myButton")
 		local pressCount = 0
-		myButton:setCallback("press", function(myButton, event)
+		myButton:on("press", function(myButton, event)
 
 			pressCount = pressCount+1
 
@@ -111,7 +111,7 @@
 	- close, canClose
 	- exists
 	- getAnchor, setAnchor, getAnchorX, setAnchorX, getAnchorY, setAnchorY
-	- getCallback, setCallback, trigger, triggerBubbling
+	- getCallback, setCallback, on, off, trigger, triggerBubbling
 	- getClosest
 	- getData, setData, swapData
 	- getDimensions, setDimensions, getWidth, setWidth, getHeight, setHeight
@@ -1326,7 +1326,7 @@ end
 
 
 -- getFont
-Gui:defineGet('_font')
+Gui:defget'_font'
 
 -- setFont( font )
 function Gui:setFont(font)
@@ -1339,7 +1339,7 @@ function Gui:setFont(font)
 end
 
 -- getBoldFont
-Gui:defineGet('_boldFont')
+Gui:defget'_boldFont'
 
 -- setBoldFont( font )
 function Gui:setBoldFont(font)
@@ -1352,7 +1352,7 @@ function Gui:setBoldFont(font)
 end
 
 -- getSmallFont
-Gui:defineGet('_smallFont')
+Gui:defget'_smallFont'
 
 -- setSmallFont( font )
 function Gui:setSmallFont(font)
@@ -1367,7 +1367,7 @@ end
 
 
 -- element = getHoveredElement( )
-Gui:defineGet('_hoveredElement')
+Gui:defget'_hoveredElement'
 
 
 
@@ -1386,7 +1386,7 @@ do
 	end
 
 	-- getNavigationTarget
-	Gui:defineGet('_navigationTarget')
+	Gui:defget'_navigationTarget'
 
 	-- success = navigateTo( widget )
 	function Gui:navigateTo(widget)
@@ -1552,25 +1552,25 @@ end
 
 
 -- element = getRoot( )
-Gui:defineGet('_root')
+Gui:defget'_root'
 
 
 
 -- getScissorCoordsConverter, setScissorCoordsConverter
-Gui:define('_scissorCoordsConverter')
+Gui:def'_scissorCoordsConverter'
 
 
 
 -- getSoundPlayer, setSoundPlayer
 -- soundPlayer( sound )
-Gui:define('_soundPlayer')
+Gui:def'_soundPlayer'
 
 
 
 -- spriteLoader = getSpriteLoader( )
 -- setSpriteLoader( spriteLoader )
 -- sprite = spriteLoader( spriteName )
-Gui:define('_spriteLoader')
+Gui:def'_spriteLoader'
 
 
 
@@ -1619,7 +1619,7 @@ function Gui:setTargetCallback(targetAndEvent, cb)
 	if not el then
 		return false, err
 	end
-	el:setCallback(event, cb)
+	el:on(event, cb)
 	return true
 end
 
@@ -1628,7 +1628,7 @@ end
 -- textPreprocessor = getTextPreprocessor( )
 -- setTextPreprocessor( textPreprocessor )
 -- text = textPreprocessor( text, element )
-Gui:define'_textPreprocessor'
+Gui:def'_textPreprocessor'
 
 -- Manually re-preprocess texts. Useful if e.g. the program's language changed.
 -- reprocessTexts( )
@@ -1647,7 +1647,7 @@ end
 
 
 -- getTheme
-Gui:defineGet'_theme'
+Gui:defget'_theme'
 
 -- setTheme( theme )
 function Gui:setTheme(theme)
@@ -2159,7 +2159,7 @@ function Cs.element:setAnchor(anchorX, anchorY)
 end
 
 -- getAnchorX
-Cs.element:defineGet('_anchorX')
+Cs.element:defget'_anchorX'
 
 -- setAnchorX( anchorX )
 function Cs.element:setAnchorX(anchorX)
@@ -2171,7 +2171,7 @@ function Cs.element:setAnchorX(anchorX)
 end
 
 -- getAnchorY
-Cs.element:defineGet('_anchorY')
+Cs.element:defget'_anchorY'
 
 -- setAnchorY( anchorY )
 function Cs.element:setAnchorY(anchorY)
@@ -2192,6 +2192,15 @@ end
 -- setCallback( event, callback )
 function Cs.element:setCallback(event, cb)
 	self._callbacks[event] = cb
+end
+
+-- Alias for setCallback().
+-- on( event, callback )
+Cs.element.on = Cs.element.setCallback
+
+-- off( event )
+function Cs.element:off(event)
+	self:on(event, nil)
 end
 
 -- value = trigger( event [, extraArguments... ] )
@@ -2267,7 +2276,7 @@ function Cs.element:setDimensions(w, h)
 end
 
 -- getWidth
-Cs.element:defineGet('_width')
+Cs.element:defget'_width'
 
 -- setWidth( width )
 function Cs.element:setWidth(w)
@@ -2279,7 +2288,7 @@ function Cs.element:setWidth(w)
 end
 
 -- getHeight
-Cs.element:defineGet('_height')
+Cs.element:defget'_height'
 
 -- setHeight( height )
 function Cs.element:setHeight(w)
@@ -2293,12 +2302,12 @@ end
 
 
 -- getGui
-Cs.element:defineGet('_gui')
+Cs.element:defget'_gui'
 
 
 
 -- getId
-Cs.element:defineGet('_id')
+Cs.element:defget'_id'
 
 -- state = hasId( id [, id2... ] )
 function Cs.element:hasId(id, ...)
@@ -2402,7 +2411,7 @@ function Cs.element:setOrigin(originX, originY)
 end
 
 -- getOriginX
-Cs.element:defineGet('_originX')
+Cs.element:defget'_originX'
 
 -- setOriginX( originX )
 function Cs.element:setOriginX(originX)
@@ -2414,7 +2423,7 @@ function Cs.element:setOriginX(originX)
 end
 
 -- getOriginY
-Cs.element:defineGet('_originY')
+Cs.element:defget'_originY'
 
 -- setOriginY( originY )
 function Cs.element:setOriginY(originY)
@@ -2428,7 +2437,7 @@ end
 
 
 -- getParent
-Cs.element:defineGet('_parent')
+Cs.element:defget'_parent'
 
 -- parents = getParents( )
 -- Returns parents, with the closest parent first
@@ -2537,7 +2546,7 @@ function Cs.element:setPosition(x, y)
 end
 
 -- getX
-Cs.element:defineGet('_x')
+Cs.element:defget'_x'
 
 -- setX( x )
 function Cs.element:setX(x)
@@ -2549,7 +2558,7 @@ function Cs.element:setX(x)
 end
 
 -- getY
-Cs.element:defineGet('_y')
+Cs.element:defget'_y'
 
 -- setY( y )
 function Cs.element:setY(y)
@@ -2619,7 +2628,7 @@ end
 
 
 -- getTooltip, setTooltip
-Cs.element:define('_tooltip')
+Cs.element:def'_tooltip'
 
 
 
@@ -2965,13 +2974,13 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 		type='container', style='_MENU', expandX=true, expandY=true, closable=true, captureGuiInput=true,
 		[1] = {type='vbar', padding=padding, maxHeight=root:getHeight()},
 	}
-	menu:setCallback('closed', function(button, event)
+	menu:on('closed', function(button, event)
 		if cb then
 			cb(0, '')
 			cb = nil
 		end
 	end)
-	menu:setCallback('mousedown', function(button, event, x, y, buttonN)
+	menu:on('mousedown', function(button, event, x, y, buttonN)
 		menu:close()
 	end)
 
@@ -2984,7 +2993,7 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 		end
 		local isToggled = (i == highlightI)
 		local button = buttons:insert{ type='button', text=text, text2=text2, align='left', toggled=isToggled }
-		button:setCallback('press', function(button, event)
+		button:on('press', function(button, event)
 			menu:remove()
 			if cb then
 				cb(i, text)
@@ -3213,7 +3222,7 @@ end
 
 
 -- getMaxWidth
-Cs.container:defineGet('_maxWidth')
+Cs.container:defget'_maxWidth'
 
 -- setMaxWidth( width )
 -- width: nil removes restriction
@@ -3227,7 +3236,7 @@ function Cs.container:setMaxWidth(w)
 end
 
 -- getMaxHeight
-Cs.container:defineGet('_maxHeight')
+Cs.container:defget'_maxHeight'
 
 -- setMaxHeight( height )
 -- height: nil removes restriction
@@ -3243,7 +3252,7 @@ end
 
 
 -- getPadding
-Cs.container:defineGet('_padding')
+Cs.container:defget'_padding'
 
 -- setPadding( padding )
 function Cs.container:setPadding(padding)
@@ -3970,7 +3979,7 @@ end
 
 -- getAlign, setAlign
 -- Note: We shouldn't have to update layout after changing text alignment
-Cs.leaf:define('_align')
+Cs.leaf:def'_align'
 
 
 
@@ -3990,10 +3999,10 @@ end
 
 
 -- getText
-Cs.leaf:defineGet'_text'
+Cs.leaf:defget'_text'
 
 -- getUnprocessedText
-Cs.leaf:defineGet'_unprocessedText'
+Cs.leaf:defget'_unprocessedText'
 
 -- setText( text )
 function Cs.leaf:setText(text)
@@ -4038,7 +4047,7 @@ end
 
 
 -- getTextColor, setTextColor
-Cs.leaf:define('_textColor')
+Cs.leaf:def'_textColor'
 
 
 
@@ -4146,7 +4155,7 @@ end
 
 
 -- getCanvasBackgroundColor, setCanvasBackgroundColor
-Cs.canvas:define('_canvasBackgroundColor')
+Cs.canvas:def'_canvasBackgroundColor'
 
 
 
@@ -4230,12 +4239,12 @@ end
 
 
 -- getImageBackgroundColor, setImageBackgroundColor
-Cs.image:define'_imageBackgroundColor'
+Cs.image:def'_imageBackgroundColor'
 
 
 
 -- getImageColor, setImageColor
-Cs.image:define('_imageColor')
+Cs.image:def'_imageColor'
 
 
 
@@ -4256,10 +4265,10 @@ function Cs.image:getImageScale()
 end
 
 -- getImageScaleX
-Cs.image:defineGet'_imageScaleX'
+Cs.image:defget'_imageScaleX'
 
 -- getImageScaleY
-Cs.image:defineGet'_imageScaleY'
+Cs.image:defget'_imageScaleY'
 
 -- setImageScale( scaleX [, scaleY=scaleX ] )
 function Cs.image:setImageScale(sx, sy)
@@ -4522,17 +4531,17 @@ end
 
 
 
-Cs.button:defineGet'_arrow'
+Cs.button:defget'_arrow'
 
 
 
 -- getImageBackgroundColor, setImageBackgroundColor
-Cs.button:define'_imageBackgroundColor'
+Cs.button:def'_imageBackgroundColor'
 
 
 
 -- getImageColor, setImageColor
-Cs.button:defineGet('_imageColor')
+Cs.button:defget'_imageColor'
 
 
 
@@ -4553,10 +4562,10 @@ function Cs.button:getImageScale()
 end
 
 -- getImageScaleX
-Cs.button:defineGet'_imageScaleX'
+Cs.button:defget'_imageScaleX'
 
 -- getImageScaleY
-Cs.button:defineGet'_imageScaleY'
+Cs.button:defget'_imageScaleY'
 
 -- setImageScale( scaleX [, scaleY=scaleX ] )
 function Cs.button:setImageScale(sx, sy)
@@ -4592,10 +4601,10 @@ end
 
 
 -- getText2
-Cs.button:defineGet'_text2'
+Cs.button:defget'_text2'
 
 -- getUnprocessedText2
-Cs.leaf:defineGet'_unprocessedText2'
+Cs.leaf:defget'_unprocessedText2'
 
 -- OVERRIDE  setText( text )
 function Cs.button:setText(text)
@@ -4912,7 +4921,7 @@ end
 
 
 -- getField
-Cs.input:defineGet('_field')
+Cs.input:defget'_field'
 
 
 

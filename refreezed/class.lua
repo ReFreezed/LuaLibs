@@ -1,35 +1,17 @@
 --[[============================================================
 --=
---=  Class module
+--=  Class module v2.0
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See the bottom of this file)
 --=
---=-------------------------------------------------------------
---=
---=  MIT License
---=
---=  Copyright © 2017 Marcus 'ReFreezed' Thunström
---=
---=  Permission is hereby granted, free of charge, to any person obtaining a copy
---=  of this software and associated documentation files (the "Software"), to deal
---=  in the Software without restriction, including without limitation the rights
---=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
---=  copies of the Software, and to permit persons to whom the Software is
---=  furnished to do so, subject to the following conditions:
---=
---=  The above copyright notice and this permission notice shall be included in all
---=  copies or substantial portions of the Software.
---=
---=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
---=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
---=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
---=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
---=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
---=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
---=  SOFTWARE.
+--=  Changelog:
+--=  v2.0: Renamed define/defineGet/defineSet to def/defget/defset.
+--=  v1.0: First release.
 --=
 --==============================================================
 
 	myClass = require("class")( className, baseTable ) -- create a new class
-	subClass = myClass:extend( className, baseTable ) -- create a sub class
+	subClass = myClass:extend( className, baseTable ) -- create a subclass
 
 	subClass.super -- access the parent class
 
@@ -40,9 +22,9 @@
 	instance.class -- access the instance's class
 
 	-- Shorthands
-	myClass:define("myValue") -- automatically define simple getter and setter (getMyValue and setMyValue)
-	myClass:defineGet("myReadOnly") -- define simple getter (instance:getMyReadOnly returns instance.myReadOnly)
-	myClass:defineSet("myValue") -- define simple setter (instance:setMyValue updates instance.myValue)
+	myClass:def("myValue") -- automatically define simple getter and setter (getMyValue and setMyValue)
+	myClass:defget("myReadOnly") -- define simple getter (instance:getMyReadOnly returns instance.myReadOnly)
+	myClass:defset("myValue") -- define simple setter (instance:setMyValue updates instance.myValue)
 
 --============================================================]]
 
@@ -51,7 +33,7 @@ local instances = setmetatable({}, {__mode='k'})
 
 --==============================================================
 
-local extend, define, defineGet, defineSet, is, as, newClass
+local extend, def, defget, defset, is, as, newClass
 
 -- class = newClass( name, class )
 local classMt = {
@@ -97,29 +79,19 @@ function extend(C, name, subC)
 	return newClass(name, subC)
 end
 
--- class:define( name [, getter=true, setter=true ] )
--- getter/setter: function or boolean
-function define(C, k, get, set)
-	local suffix = k:gsub('^_', ''):gsub('^.', string.upper)
-	if (get ~= false) then
-		C['get'..suffix] = (type(get) == 'function' and get or function(self)
-			return self[k]
-		end)
-	end
-	if (set ~= false) then
-		C['set'..suffix] = (type(set) == 'function' and set or function(self, v)
-			self[k] = v
-		end)
-	end
+-- class:def( propertyName [, getterMethod, setterMethod ] )
+function def(C, k, get, set)
+	defget(C, k, get)
+	defset(C, k, set)
 end
--- class:defineGet( name [, getter ] )
-function defineGet(C, k, get)
+-- class:defget( propertyName [, getterMethod ] )
+function defget(C, k, get)
 	C['get'..k:gsub('^_', ''):gsub('^.', string.upper)] = (get or function(self)
 		return self[k]
 	end)
 end
--- class:defineSet( name [, setter ] )
-function defineSet(C, k, set)
+-- class:defset( propertyName [, setterMethod ] )
+function defset(C, k, set)
 	C['set'..k:gsub('^_', ''):gsub('^.', string.upper)] = (set or function(self, v)
 		self[k] = v
 	end)
@@ -155,7 +127,7 @@ local BaseClass = newClass('Class', {
 		return ('%s(%s)'):format(instance.class.__name, instances[instance])
 	end,
 	extend = extend,
-	define = define, defineGet = defineGet, defineSet = defineSet,
+	def = def, defget = defget, defset = defset,
 	is = is, as = as,
 	init = function()end,
 })
@@ -164,4 +136,28 @@ return function(...)
 	return BaseClass:extend(...)
 end
 
+--==============================================================
+--=
+--=  MIT License
+--=
+--=  Copyright © 2017 Marcus 'ReFreezed' Thunström
+--=
+--=  Permission is hereby granted, free of charge, to any person obtaining a copy
+--=  of this software and associated documentation files (the "Software"), to deal
+--=  in the Software without restriction, including without limitation the rights
+--=  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+--=  copies of the Software, and to permit persons to whom the Software is
+--=  furnished to do so, subject to the following conditions:
+--=
+--=  The above copyright notice and this permission notice shall be included in all
+--=  copies or substantial portions of the Software.
+--=
+--=  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+--=  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+--=  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+--=  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+--=  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+--=  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+--=  SOFTWARE.
+--=
 --==============================================================

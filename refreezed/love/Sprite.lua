@@ -456,7 +456,7 @@ end
 
 
 -- getAnimation
-Sprite:defineGet'_animation'
+Sprite:defget'_animation'
 
 -- animationName = getAnimationName( )
 function Sprite:getAnimationName()
@@ -492,16 +492,16 @@ end
 
 
 -- getAnimationSpeed, setAnimationSpeed
-Sprite:define'_animationSpeed'
+Sprite:def'_animationSpeed'
 
 -- getDynamicAnimationSpeed, setDynamicAnimationSpeed
 -- 'dynamicAnimationSpeed' is really just a second 'animationSpeed'.
-Sprite:define'_dynamicAnimationSpeed'
+Sprite:def'_dynamicAnimationSpeed'
 
 
 
 -- getBlendMode
-Sprite:defineGet'_blendMode'
+Sprite:defget'_blendMode'
 
 -- setBlendMode( blendMode )
 function Sprite:setBlendMode(blendMode)
@@ -567,10 +567,10 @@ end
 
 
 -- getCurrentFrame, setCurrentFrame
-Sprite:define'_currentFrame'
+Sprite:def'_currentFrame'
 
 -- getCurrentFrameTime, setCurrentFrameTime
-Sprite:define'_currentFrameTime'
+Sprite:def'_currentFrameTime'
 
 
 
@@ -679,7 +679,7 @@ end
 
 
 -- getName, setName
-Sprite:define'_name'
+Sprite:def'_name'
 
 
 
@@ -696,10 +696,10 @@ function Sprite:setOffset(offsetX, offsetY)
 end
 
 -- getOffsetX, setOffsetX
-Sprite:define'_offsetX'
+Sprite:def'_offsetX'
 
 -- getOffsetY, setOffsetY
-Sprite:define'_offsetY'
+Sprite:def'_offsetY'
 
 -- translateOffset( offsetX, offsetY )
 function Sprite:translateOffset(offsetX, offsetY)
@@ -711,19 +711,19 @@ end
 
 
 -- getOpacity, setOpacity
-Sprite:define'_opacity'
+Sprite:def'_opacity'
 
 
 
 -- pixelSnapper = getPixelSnapper( )
 -- setPixelSnapper( pixelSnapper )
 -- x, y = pixelSnapper( x, y )
-Sprite:define'_pixelSnapper'
+Sprite:def'_pixelSnapper'
 
 
 
 -- getRotation, setRotation
-Sprite:define'_rotation'
+Sprite:def'_rotation'
 
 
 
@@ -740,15 +740,15 @@ function Sprite:setScale(scaleX, scaleY)
 end
 
 -- getScaleX, setScaleX
-Sprite:define'_scaleX'
+Sprite:def'_scaleX'
 
 -- getScaleY, setScaleY
-Sprite:define'_scaleY'
+Sprite:def'_scaleY'
 
 
 
 -- getShader
-Sprite:defineGet'_shader'
+Sprite:defget'_shader'
 
 -- shader = setShader( shader )
 function Sprite:setShader(shader)

@@ -518,14 +518,20 @@ end
 
 -- setColor( red, green, blue [, alpha=255 ] )
 -- setColor( grey [, alpha=255 ] )
-function Sprite:setColor(rOrGrey, gOrAlpha, b, a)
-	assertarg(1, rOrGrey, 'number')
+-- setColor( color )
+-- color = { red, green, blue [, alpha=255 ] )
+-- color = { grey [, alpha=255 ] )
+function Sprite:setColor(_1, _2, _3, _4)
+	if type(_1) == 'table' then
+		return self:setColor(unpack(_1))
+	end
+	assertarg(1, _1, 'number')
 	local color = self._color
-	if b then
-		assertarg(2, gOrAlpha, 'number')
-		color[1], color[2], color[3], color[4] = rOrGrey, gOrAlpha, b, (a or 255)
+	if _3 then
+		assertarg(2, _2, 'number')
+		color[1], color[2], color[3], color[4] = _1, _2, _3, (_4 or 255)
 	else
-		color[1], color[2], color[3], color[4] = rOrGrey, rOrGrey, rOrGrey, (gOrAlpha or 255)
+		color[1], color[2], color[3], color[4] = _1, _1, _1, (_2 or 255)
 	end
 end
 

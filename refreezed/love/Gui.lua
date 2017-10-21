@@ -12,7 +12,6 @@
 --=  - refreezed.love.Sprite
 --=
 --=  TODO:
---=  - CSS-like selectors in styles? Also, maybe put style data in themes instead of having defineStyle()?
 --=  - Percentage sizes for elements.
 --=
 --==============================================================
@@ -589,10 +588,11 @@ do
 
 end
 
--- result = isElementMatchingSelectorPath( element, selectorPath )
+-- result = isElementMatchingSelectorPath( element, selectorPath [, breakElement ] )
+-- The path match checking loop breaks before reaching 'breakElement'.
 do
 	local function isMatchingSection(el, selPathSection)
-		for i, selPathSegment in ipairs(selPathSection) do
+		for _, selPathSegment in ipairs(selPathSection) do
 
 			-- ID
 			if selPathSegment.type == 'id' then
@@ -617,7 +617,7 @@ do
 		return true
 	end
 
-	function isElementMatchingSelectorPath(el, selPath)
+	function isElementMatchingSelectorPath(el, selPath, breakElement)
 		local i = #selPath
 
 		local selPathSection = selPath[i]
@@ -625,17 +625,23 @@ do
 			return false -- An empty path means nothing can match!
 		end
 
-		if not isMatchingSection(el, selPathSection) then
-			return false
+		if el == breakElement then
+			return false -- We got to the break point before matching the whole path.
 		end
-
-		i = i-1
-		selPathSection = selPath[i]
-		if not selPathSection then
-			return true -- The whole path (with only one section) matched.
+		if isMatchingSection(el, selPathSection) then
+			i = i-1
+			selPathSection = selPath[i]
+			if not selPathSection then
+				return true -- The whole path (with only one section) matched.
+			end
+		else
+			return false -- The last section must match the specified element, but didn't.
 		end
 
 		for _, parent in el:parents() do
+			if parent == breakElement then
+				return false -- We got to the break point before matching the whole path.
+			end
 			if isMatchingSection(parent, selPathSection) then
 				i = i-1
 				selPathSection = selPath[i]
@@ -645,7 +651,7 @@ do
 			end
 		end
 
-		return false
+		return false -- We went through all parents without matching the whole path.
 	end
 
 end
@@ -1237,6 +1243,8 @@ end
 
 -- defineStyle( styleName, styleData )
 function Gui:defineStyle(styleName, styleData)
+	assertArg(1, styleName, 'string')
+	assertArg(2, styleData, 'table')
 	self._styles[styleName] = styleData
 end
 
@@ -1254,9 +1262,7 @@ end
 -- elements = findAll( id )
 function Gui:findAll(id)
 	local root = self._root
-	if not root then
-		return {}
-	end
+	if not root then  return {}  end
 	local els = root:findAll(id)
 	if root._id == id then
 		table.insert(els, 1, root)
@@ -1276,22 +1282,24 @@ function Gui:findToggled()
 	return (root and root:findToggled())
 end
 
+-- Match an element using a CSS-like selector.
 -- element = match( selector )
+-- selector = "elementtype #id .tag"
+-- Note: Element types include subtypes (e.g. 'bar' includes both 'vbar' and 'hbar').
 function Gui:match(selector)
 	local root = self._root
-	if root then
-		return root:match(selector)
-	end
-	return nil
+	if not root then  return nil  end
+	return root:match(selector, true)
 end
 
+-- Match elements using a CSS-like selector.
 -- elements = matchAll( selector )
+-- selector = "elementtype #id .tag"
+-- Note: Element types include subtypes (e.g. 'bar' includes both 'vbar' and 'hbar').
 function Gui:matchAll(selector)
 	local root = self._root
-	if root then
-		return root:matchAll(selector)
-	end
-	return {}
+	if not root then  return {}  end
+	return root:matchAll(selector, true)
 end
 
 
@@ -3187,14 +3195,21 @@ function Cs.container:findToggled()
 	return nil
 end
 
--- element = match( selector )
-function Cs.container:match(selector)
+-- Match an element using a CSS-like selector.
+-- element = match( selector [, includeSelf=false ] )
+-- selector = "elementtype #id .tag"
+-- Note: Element types include subtypes (e.g. 'bar' includes both 'vbar' and 'hbar').
+function Cs.container:match(selector, includeSelf)
 
 	local selPath = parseSelector(selector)
 	if not selPath then  return nil  end
 
+	local breakElement = (not includeSelf and self or self._parent)
+	if (includeSelf and isElementMatchingSelectorPath(self, selPath, breakElement)) then
+		return self
+	end
 	for el in self:traverse() do
-		if isElementMatchingSelectorPath(el, selPath) then
+		if isElementMatchingSelectorPath(el, selPath, breakElement) then
 			return el
 		end
 	end
@@ -3202,15 +3217,22 @@ function Cs.container:match(selector)
 	return nil
 end
 
--- elements = matchAll( selector )
-function Cs.container:matchAll(selector)
+-- Match elements using a CSS-like selector.
+-- elements = matchAll( selector [, includeSelf=false ] )
+-- selector = "elementtype #id .tag"
+-- Note: Element types include subtypes (e.g. 'bar' includes both 'vbar' and 'hbar').
+function Cs.container:matchAll(selector, includeSelf)
 
 	local elements = {}
 	local selPath = parseSelector(selector)
 
 	if selPath then
+		local breakElement = (not includeSelf and self or self._parent)
+		if (includeSelf and isElementMatchingSelectorPath(self, selPath, breakElement)) then
+			table.insert(elements, self)
+		end
 		for el in self:traverse() do
-			if isElementMatchingSelectorPath(el, selPath) then
+			if isElementMatchingSelectorPath(el, selPath, breakElement) then
 				table.insert(elements, el)
 			end
 		end

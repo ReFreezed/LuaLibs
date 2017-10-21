@@ -9,7 +9,7 @@
 --=  - refreezed.class
 --=  - refreezed.love.Animation (Used by Sprites.)
 --=  - refreezed.love.InputField
---=  - refreezed.love.Sprite (Publicly unavailable, in LuaLibs or anywhere! TO FIX!!!)
+--=  - refreezed.love.Sprite
 --=
 --=  TODO:
 --=  - CSS-like selectors in styles? Also, maybe put style data in themes instead of having defineStyle()?

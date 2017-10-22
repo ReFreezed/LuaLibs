@@ -161,7 +161,7 @@
 	- getElementAt
 	- getMaxWidth, setMaxWidth, getMaxHeight, setMaxHeight
 	- getPadding, setPadding
-	- getScroll, setScroll, scroll, updateScroll
+	- getScroll, getScrollX, getScrollY, getScrollLimit, getScrollLimitX, getScrollLimitY, setScroll, scroll, updateScroll
 	- getVisibleChild, getVisibleChildNumber, getVisibleChildCount, setVisibleChild
 	- hasScrollbars, hasScrollbarOnRight, hasScrollbarOnBottom
 	- indexOf
@@ -1004,7 +1004,7 @@ function expandElement(self, expandW, expandH)
 	local padding = self._padding
 	local parent = self._parent
 
-	local sbW = (self:isType'container' and themeGet(self._gui, 'scrollbarWidth') or 0)
+	local sbW = (self:is(Cs.container) and themeGet(self._gui, 'scrollbarWidth') or 0)
 
 	if (expandW or self._expandX) then
 		self._layoutWidth = math.min((expandW or parent._layoutInnerWidth), (maxW or math.huge))
@@ -1930,11 +1930,22 @@ end
 
 -- load( data )
 function Gui:load(data)
+
 	if data.type ~= 'root' then
 		errorf('gui root element must be of type "root"')
 	end
-	self._root = Cs.root(self, data, nil)
+
+	local root = Cs.root(self, data, nil)
+	self._root = root
+
+	local themeInit = themeGet(self, 'init')
+	themeInit(root)
+	for el in root:traverse() do
+		themeInit(el)
+	end
+
 	self._layoutNeedsUpdate = true
+
 end
 
 
@@ -3365,14 +3376,43 @@ function Cs.container:getScroll()
 	return self._scrollX, self._scrollY
 end
 
+-- getScrollX
+Cs.container:defget'_scrollX'
+
+-- getScrollY
+Cs.container:defget'_scrollY'
+
+-- x, y = getScrollLimit( )
+function Cs.container:getScrollLimit()
+	local childAreaW, childAreaH = self:getChildAreaDimensions()
+	return
+		childAreaW-2*self._padding-self._layoutInnerWidth,
+		childAreaH-2*self._padding-self._layoutInnerHeight
+end
+
+-- x = getScrollLimitX( )
+function Cs.container:getScrollLimitX()
+	local childAreaW, childAreaH = self:getChildAreaDimensions()
+	return childAreaW-2*self._padding-self._layoutInnerWidth
+end
+
+-- y = getScrollLimitY( )
+function Cs.container:getScrollLimitY()
+	local childAreaW, childAreaH = self:getChildAreaDimensions()
+	return childAreaH-2*self._padding-self._layoutInnerHeight
+end
+
 -- scrollChanged = setScroll( x, y )
 function Cs.container:setScroll(scrollX, scrollY)
+	assertArg(1, scrollX, 'number')
+	assertArg(2, scrollY, 'number')
+
 	updateLayoutIfNeeded(self._gui)
 
 	-- Limit scrolling
-	local childAreaW, childAreaH = self:getChildAreaDimensions()
-	scrollX = math.min(math.max(scrollX, childAreaW-2*self._padding-self._layoutInnerWidth), 0)
-	scrollY = math.min(math.max(scrollY, childAreaH-2*self._padding-self._layoutInnerHeight), 0)
+	local limitX, limitY = self:getScrollLimit()
+	scrollX = math.min(math.max(scrollX, limitX), 0)
+	scrollY = math.min(math.max(scrollY, limitY), 0)
 	local dx, dy = scrollX-self._scrollX, scrollY-self._scrollY
 	if (dx == 0 and dy == 0) then
 		return false
@@ -3570,8 +3610,18 @@ function Cs.container:insert(childData, i)
 	local child = C(self._gui, childData, self)
 	table.insert(self, (i or #self+1), child)
 
+	scheduleLayoutUpdateIfDisplayed(child)
+
+	local themeInit = themeGet(self._gui, 'init')
+	themeInit(child)
+	if child:is(Cs.container) then
+		for el in child:traverse() do
+			themeInit(el)
+		end
+	end
+
 	validateNavigationTarget(self._gui)
-	scheduleLayoutUpdateIfDisplayed(self)
+	scheduleLayoutUpdateIfDisplayed(child)
 
 	return child
 end
@@ -5271,6 +5321,12 @@ defaultTheme = {
 
 	scrollbarWidth     = SCROLLBAR_WIDTH, -- @Incomplete: Get scrollbar width as 'size' instead of like this.
 	scrollbarMinLength = SCROLLBAR_MIN_LENGTH,
+
+	----------------------------------------------------------------
+
+	init = function(el)
+		-- This function is called for every newly created element.
+	end,
 
 	----------------------------------------------------------------
 

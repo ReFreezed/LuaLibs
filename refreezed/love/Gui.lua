@@ -13,7 +13,7 @@
 --=
 --=  TODO:
 --=  - Make scrollbars draggable.
---=  - Draw scrollbars in themes.
+--=  - Make pageup/pagedown/home/end work in scrollables.
 --=  - Percentage sizes for elements.
 --=
 --==============================================================
@@ -315,7 +315,7 @@ local reverseArray
 local round
 local setMouseFocus, setKeyboardFocus
 local setScissor
-local themeCallBack, themeGet, themeRender, themeGetSize
+local themeCallBack, themeGet, themeRender, themeRenderArea, themeGetSize
 local updateHoveredElement, validateNavigationTarget
 local updateLayout, updateLayoutIfNeeded, scheduleLayoutUpdateIfDisplayed
 local xywh
@@ -805,12 +805,17 @@ end
 
 -- themeRender( element, what, extraArgument... )
 function themeRender(el, what, ...)
+	return themeRenderArea(el, what, 0, 0, el._layoutWidth, el._layoutHeight, ...)
+end
+
+-- themeRenderArea( element, what, areaX, areaY, areaWidth, areaHeight, extraArgument... )
+function themeRenderArea(el, what, areaX, areaY, areaW, areaH, ...)
 	local gui = el._gui
 
 	LG.push('all')
-	LG.translate(el._layoutX+el._layoutOffsetX, el._layoutY+el._layoutOffsetY)
+	LG.translate(el._layoutX+el._layoutOffsetX+areaX, el._layoutY+el._layoutOffsetY+areaY)
 
-	themeCallBack(gui, 'draw', what, el, el._layoutWidth, el._layoutHeight, ...)
+	themeCallBack(gui, 'draw', what, el, areaW, areaH, ...)
 	if gui._elementScissorIsSet then
 		setScissor(gui, nil)
 		gui._elementScissorIsSet = false
@@ -978,7 +983,7 @@ function updateContainerLayoutSize(self)
 	local maxW, maxH = self._maxWidth, self._maxHeight
 	local padding = self._padding
 
-	local sbW = self.SCROLLBAR_WIDTH
+	local sbW = themeGet(self._gui, 'scrollbarWidth')
 
 	self._layoutWidth =  math.min(
 		self._layoutInnerWidth+2*padding+(maxH and sbW or 0),
@@ -999,7 +1004,7 @@ function expandElement(self, expandW, expandH)
 	local padding = self._padding
 	local parent = self._parent
 
-	local sbW = self.SCROLLBAR_WIDTH -- Is nil for non-containers.
+	local sbW = (self:isType'container' and themeGet(self._gui, 'scrollbarWidth') or 0)
 
 	if (expandW or self._expandX) then
 		self._layoutWidth = math.min((expandW or parent._layoutInnerWidth), (maxW or math.huge))
@@ -3131,7 +3136,6 @@ end
 Cs.container = Cs.element:extend('GuiContainer', {
 
 	SCROLL_SPEED_X = 15, SCROLL_SPEED_Y = 20,
-	SCROLLBAR_WIDTH = 4, SCROLLBAR_MIN_LENGTH = 8,
 
 	_scrollX = 0, _scrollY = 0,
 
@@ -3179,7 +3183,8 @@ function Cs.container:_draw()
 	local maxW, maxH = self._maxWidth, self._maxHeight
 	local childAreaW, childAreaH = self:getChildAreaDimensions()
 
-	local sbW = self.SCROLLBAR_WIDTH
+	local sbW = themeGet(gui, 'scrollbarWidth')
+	local sbMinW = themeGet(gui, 'scrollbarMinLength')
 
 	self:trigger('beforedraw', x, y, w, h)
 	drawLayoutBackground(self)
@@ -3197,28 +3202,25 @@ function Cs.container:_draw()
 	if maxW then
 		local insideW = (childAreaW-2*self._padding)
 		local innerW = self._layoutInnerWidth
-		local handleLen = math.max(round(childAreaW*insideW/innerW), self.SCROLLBAR_MIN_LENGTH)
+		local handleLen = math.max(round(childAreaW*insideW/innerW), sbMinW)
 		local handleX, handleY = x, y+h-sbW
 		if innerW > insideW then
 			handleX = round(x - (childAreaW-handleLen) * self._scrollX/(innerW-insideW) )
 		end
-		LG.setColor(0, 0, 0, 100)
-		LG.rectangle('fill', handleX, handleY, handleLen, sbW)
-		LG.setColor(255, 255, 255, 200)
-		LG.rectangle('fill', handleX+1, handleY+1, handleLen-2, sbW-2)
+		themeRenderArea(self, 'scrollbar', 0, h-sbW, childAreaW, sbW, 'x', handleX-x, handleLen) -- asdf
 	end
 	if maxH then
 		local insideH = (childAreaH-2*self._padding)
 		local innerH = self._layoutInnerHeight
-		local handleLen = math.max(round(childAreaH*insideH/innerH), self.SCROLLBAR_MIN_LENGTH)
+		local handleLen = math.max(round(childAreaH*insideH/innerH), sbMinW)
 		local handleX, handleY = x+w-sbW, y
 		if innerH > insideH then
 			handleY = round(y - (childAreaH-handleLen) * self._scrollY/(innerH-insideH) )
 		end
-		LG.setColor(0, 0, 0, 100)
-		LG.rectangle('fill', handleX, handleY, sbW, handleLen)
-		LG.setColor(255, 255, 255, 200)
-		LG.rectangle('fill', handleX+1, handleY+1, sbW-2, handleLen-2)
+		themeRenderArea(self, 'scrollbar', w-sbW, 0, sbW, childAreaH, 'y', handleY-y, handleLen)
+	end
+	if (maxW and maxH) then
+		themeRenderArea(self, 'scrollbardeadzone', w-sbW, h-sbW, sbW, sbW)
 	end
 
 end
@@ -3522,7 +3524,7 @@ end
 
 -- width, height = getChildAreaDimensions( )
 function Cs.container:getChildAreaDimensions()
-	local sbW = self.SCROLLBAR_WIDTH
+	local sbW = themeGet(self._gui, 'scrollbarWidth')
 	return
 		(self._maxHeight and self._layoutWidth -sbW or self._layoutWidth),
 		(self._maxWidth  and self._layoutHeight-sbW or self._layoutHeight)
@@ -3757,7 +3759,7 @@ function Cs.container:_updateLayoutSize()
 	local padding = self._padding
 	local parent = self._parent
 
-	local sbW = self.SCROLLBAR_WIDTH
+	local sbW = themeGet(self._gui, 'scrollbarWidth')
 
 	self._layoutWidth = math.min(
 		(self._width or (self._expandX and parent._layoutInnerWidth) or 2*padding+(maxH and sbW or 0)),
@@ -3780,7 +3782,7 @@ function Cs.container:_expandLayout(expandW, expandH)
 	local maxW, maxH = self._maxWidth, self._maxHeight
 	local padding = self._padding
 
-	local sbW = self.SCROLLBAR_WIDTH
+	local sbW = themeGet(self._gui, 'scrollbarWidth')
 
 	if expandW then
 		self._layoutWidth = math.min(expandW, (maxW or math.huge))
@@ -4704,7 +4706,7 @@ Cs.button:def'_imageBackgroundColor'
 
 
 -- getImageColor, setImageColor
-Cs.button:defget'_imageColor'
+Cs.button:def'_imageColor'
 
 
 
@@ -5260,8 +5262,15 @@ local NAV_QUADS = Gui.create9PartQuads(NAV, 3, 3)
 
 local INPUT_PADDING = 4
 
+local SCROLLBAR_WIDTH = 6
+local SCROLLBAR_MIN_LENGTH = 10
+
 defaultTheme = {
+
 	inputIndentation = INPUT_PADDING, -- Affects mouse interactions and input field scrolling.
+
+	scrollbarWidth     = SCROLLBAR_WIDTH, -- @Incomplete: Get scrollbar width as 'size' instead of like this.
+	scrollbarMinLength = SCROLLBAR_MIN_LENGTH,
 
 	----------------------------------------------------------------
 
@@ -5567,6 +5576,23 @@ defaultTheme = {
 				LG.rectangle('fill', INPUT_PADDING+field:getCursorOffset()-1, textY, 1, valueH)
 			end
 
+		end,
+
+		-- Scrollbar.
+		-- draw.scrollbar( element, width, height, direction, handlePosition, handleLength )
+		-- draw.scrollbardeadzone( element, width, height )
+		['scrollbar'] = function(el, w, h, dir, pos, len)
+
+			LG.setColor(255, 255, 255, 70)
+			if dir == 'x' then -- asdf
+				Gui.draw9PartScaled(pos+1, 1, len-2, h-2, BUTTON_BG, unpack(BUTTON_BG_QUADS))
+			else--if dir == 'y' then
+				Gui.draw9PartScaled(1, pos+1, w-2, len-2, BUTTON_BG, unpack(BUTTON_BG_QUADS))
+			end
+
+		end,
+		['scrollbardeadzone'] = function(el, w, h)
+			-- This is the area where the two scrollbars meet.
 		end,
 
 		-- Highlight of current navigation target.

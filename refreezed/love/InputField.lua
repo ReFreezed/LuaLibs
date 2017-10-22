@@ -25,8 +25,8 @@
 	isFontFilteringActive, setFontFilteringActive
 	isPasswordActive, setPasswordActive
 
-	mouseDown, mouseMove, mouseUp
-	keyDown, textInput
+	mousepressed, mousemoved, mousereleased
+	keypressed, textinput
 
 ----------------------------------------------------------------
 
@@ -599,8 +599,8 @@ end
 
 
 
--- wasHandled = mouseDown( x, y, button )
-function InputField:mouseDown(x, y, buttonN)
+-- wasHandled = mousepressed( x, y, button )
+function InputField:mousepressed(x, y, buttonN)
 	if (buttonN ~= 1) then
 		return false
 	end
@@ -636,8 +636,8 @@ function InputField:mouseDown(x, y, buttonN)
 	return true
 end
 
--- wasHandled = mouseMove( x, y )
-function InputField:mouseMove(x, y)
+-- wasHandled = mousemoved( x, y )
+function InputField:mousemoved(x, y)
 	if (not self._mouseTextSelectionStart) then
 		return false
 	end
@@ -648,8 +648,8 @@ function InputField:mouseMove(x, y)
 	return true
 end
 
--- wasHandled = mouseUp( x, y, button )
-function InputField:mouseUp(x, y, buttonN)
+-- wasHandled = mousereleased( x, y, button )
+function InputField:mousereleased(x, y, buttonN)
 	if (not self._mouseTextSelectionStart) then
 		return false
 	end
@@ -660,8 +660,8 @@ end
 
 
 
--- wasHandled = keyDown( key, scancode, isRepeat )
-function InputField:keyDown(key, scancode, isRepeat)
+-- wasHandled = keypressed( key, scancode, isRepeat )
+function InputField:keypressed(key, scancode, isRepeat)
 	if nil then
 
 	-- Left: Move cursor to the left
@@ -804,8 +804,8 @@ function InputField:keyDown(key, scancode, isRepeat)
 	return false
 end
 
--- wasHandled = textInput( text )
-function InputField:textInput(text)
+-- wasHandled = textinput( text )
+function InputField:textinput(text)
 	if (self._selectionStart ~= self._selectionEnd) then
 		self:replace(text)
 	else

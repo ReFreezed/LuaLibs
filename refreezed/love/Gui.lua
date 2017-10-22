@@ -50,13 +50,13 @@
 	end
 
 	function love.mousepressed(x, y, mouseButton)
-		gui:mouseDown(x, y, mouseButton)
+		gui:mousepressed(x, y, mouseButton)
 	end
 	function love.mousemoved(dx, dy)
-		gui:mouseMove(dx, dy)
+		gui:mousemoved(dx, dy)
 	end
 	function love.mousereleased(x, y, mouseButton)
-		gui:mouseUp(x, y, mouseButton)
+		gui:mousereleased(x, y, mouseButton)
 	end
 
 	function love.update(dt)
@@ -79,6 +79,9 @@
 	update
 	draw
 
+	keypressed, keyreleased, textinput
+	mousepressed, mousemoved, mousereleased, wheelmoved
+
 	blur
 	defineStyle
 	find, findAll, findActive, findToggled, match, matchAll
@@ -97,9 +100,7 @@
 	isBusy, isMouseBusy
 	isIgnoringKeyboardInput
 	isMouseGrabbed, setMouseIsGrabbed
-	keyDown, keyUp, textInput
 	load
-	mouseDown, mouseMove, mouseUp, mouseWheel
 	ok, back
 	updateLayout
 
@@ -146,8 +147,8 @@
 	- updateLayout
 	- Event: beforedraw, afterdraw
 	- Event: close
-	- Event: keydown
-	- Event: mousedown, mousemove, mouseup
+	- Event: keypressed
+	- Event: mousepressed, mousemoved, mousereleased
 	- Event: refresh
 	- Event: show, hide
 	- Event: update
@@ -1215,7 +1216,7 @@ function Gui:update(dt)
 
 	-- Check if mouse is inside window
 	if (self._mouseX and not love.window.hasMouseFocus()) then
-		self:mouseMove(nil, nil)
+		self:mousemoved(nil, nil)
 	end
 
 	-- Update mouse cursor
@@ -1263,11 +1264,199 @@ end
 
 
 
+-- handled = keypressed( key, scancode, isRepeat )
+function Gui:keypressed(key, scancode, isRepeat)
+	local focus = (self._keyboardFocus or self._mouseFocus)
+	local el = (focus or self._hoveredElement)
+	if self._ignoreKeyboardInputThisFrame then
+		return (el ~= nil)
+	end
+	if el then
+		if (not focus and el:trigger('keypressed', key, scancode, isRepeat)) then
+			return true
+		end
+		local handled, grabFocus = el:_keypressed(key, scancode, isRepeat)
+		if handled then
+			if grabFocus then
+				setKeyboardFocus(self, el)
+			end
+			return true
+		end
+	end
+	if focus then
+		return true
+	end
+	local root = self._root
+	if (root and not root._hidden) then
+		for el in root:traverseVisible() do
+			if (key == 'escape' and el:canClose()) then
+				el:close()
+				return true
+			elseif el._captureInput then
+				return true
+			elseif el._captureGuiInput then
+				break
+			end
+		end
+	end
+	return false
+end
+
+-- handled = keyreleased( key, scancode )
+function Gui:keyreleased(key, scancode)
+	local focus = self._keyboardFocus
+	if focus then
+		focus:_keyreleased(key, scancode)
+		return true
+	end
+	return false
+end
+
+-- handled = textinput( text )
+function Gui:textinput(text)
+	local focus = self._keyboardFocus
+	if focus then
+		focus:_textinput(text)
+		return true
+	end
+	return false
+end
+
+
+
+-- handled = mousepressed( x, y, button )
+function Gui:mousepressed(x, y, buttonN)
+	self._mouseX, self._mouseY = x, y
+
+	if self._mouseFocusSet[buttonN] then
+		return true -- Should be an error, but it's not really an issue.
+	end
+
+	local focus = self._mouseFocus
+	if focus then
+		self._mouseFocusSet[buttonN] = true
+	end
+
+	updateLayoutIfNeeded(self) -- Updates hovered element.
+
+	local el = (focus or self._hoveredElement)
+	if el then
+		if el:trigger('mousepressed',
+			x-el._layoutX-el._layoutOffsetX,
+			y-el._layoutY-el._layoutOffsetY,
+			buttonN)
+		then
+			return true -- Suppress default behavior.
+		end
+		local handled, grabFocus = el:_mousepressed(x, y, buttonN)
+		handled = (handled or el._captureInput or el._captureGuiInput or el:isSolid())
+		if handled then
+			if (grabFocus and not next(self._mouseFocusSet)) then
+				setMouseFocus(self, el, buttonN)
+			end
+			return true
+		end
+	end
+
+	return (focus ~= nil)
+end
+
+-- handled = mousemoved( x, y )
+function Gui:mousemoved(x, y)
+	self._mouseX, self._mouseY = x, y
+
+	if not updateLayoutIfNeeded(self) then
+		updateHoveredElement(self) -- Make sure hovered element updates whenever mouse moves.
+	end
+
+	local focus = self._mouseFocus
+	if not focus then
+		return false
+	end
+
+	local el = (x and focus or self._hoveredElement)
+	if el then
+		el:_mousemoved(x, y)
+		el:trigger('mousemoved',
+			x-el._layoutX-el._layoutOffsetX,
+			y-el._layoutY-el._layoutOffsetY)
+	end
+
+	return true
+end
+
+-- handled = mousereleased( x, y, button )
+function Gui:mousereleased(x, y, buttonN)
+	self._mouseX, self._mouseY = x, y
+
+	local focus = self._mouseFocus
+	if not (focus and self._mouseFocusSet[buttonN]) then
+		return false
+	end
+
+	self._mouseFocusSet[buttonN] = nil
+
+	updateLayoutIfNeeded(self) -- Updates hovered element.
+
+	local el = (focus or self._hoveredElement)
+	if el then
+		el:_mousereleased(x, y, buttonN)
+	end
+
+	if not next(self._mouseFocusSet) then
+		setMouseFocus(self, nil)
+	end
+
+	if el then
+		el:trigger('mousereleased',
+			x-el._layoutX-el._layoutOffsetX,
+			y-el._layoutY-el._layoutOffsetY,
+			buttonN)
+	end
+
+	return true
+end
+
+-- handled = wheelmoved( dx, dy )
+function Gui:wheelmoved(dx, dy)
+	local isScroll = (dx ~= 0 or dy ~= 0)
+
+	-- Shift key swaps X and Y scrolling.
+	if love.keyboard.isDown('lshift','rshift') then
+		dx, dy = dy, dx
+	end
+
+	-- Focus
+	local focus = self._mouseFocus
+	if focus then
+		return (isScroll and focus:_wheelmoved(dx, dy) or focus:isSolid())
+	end
+
+	-- Hovered element (bubbling event)
+	updateLayoutIfNeeded(self) -- Updates hovered element.
+	local el, anyIsSolid = self._hoveredElement, false
+	while el do
+		if (isScroll and el:_wheelmoved(dx, dy)) then
+			return true
+		end
+		anyIsSolid = (anyIsSolid or el:isSolid())
+		el = el._parent
+	end
+	return anyIsSolid
+
+end
+
+
+
+--==============================================================
+
+
+
 -- blur( )
 function Gui:blur()
 	if self._mouseFocus then
 		for buttonN in pairs(self._mouseFocusSet) do
-			self:mouseUp(-1, -1, buttonN)
+			self:mousereleased(-1, -1, buttonN)
 		end
 	end
 	setMouseFocus(self, nil)
@@ -1734,66 +1923,6 @@ end
 
 
 
--- handled = keyDown( key, scancode, isRepeat )
-function Gui:keyDown(key, scancode, isRepeat)
-	local focus = (self._keyboardFocus or self._mouseFocus)
-	local el = (focus or self._hoveredElement)
-	if self._ignoreKeyboardInputThisFrame then
-		return (el ~= nil)
-	end
-	if el then
-		if (not focus and el:trigger('keydown', key, scancode, isRepeat)) then
-			return true
-		end
-		local handled, grabFocus = el:_keyDown(key, scancode, isRepeat)
-		if handled then
-			if grabFocus then
-				setKeyboardFocus(self, el)
-			end
-			return true
-		end
-	end
-	if focus then
-		return true
-	end
-	local root = self._root
-	if (root and not root._hidden) then
-		for el in root:traverseVisible() do
-			if (key == 'escape' and el:canClose()) then
-				el:close()
-				return true
-			elseif el._captureInput then
-				return true
-			elseif el._captureGuiInput then
-				break
-			end
-		end
-	end
-	return false
-end
-
--- handled = keyUp( key, scancode )
-function Gui:keyUp(key, scancode)
-	local focus = self._keyboardFocus
-	if focus then
-		focus:_keyUp(key, scancode)
-		return true
-	end
-	return false
-end
-
--- handled = textInput( text )
-function Gui:textInput(text)
-	local focus = self._keyboardFocus
-	if focus then
-		focus:_textInput(text)
-		return true
-	end
-	return false
-end
-
-
-
 -- load( data )
 function Gui:load(data)
 	if data.type ~= 'root' then
@@ -1801,130 +1930,6 @@ function Gui:load(data)
 	end
 	self._root = Cs.root(self, data, nil)
 	self._layoutNeedsUpdate = true
-end
-
-
-
--- handled = mouseDown( x, y, button )
-function Gui:mouseDown(x, y, buttonN)
-	self._mouseX, self._mouseY = x, y
-
-	if self._mouseFocusSet[buttonN] then
-		return true -- Should be an error, but it's not really an issue.
-	end
-
-	local focus = self._mouseFocus
-	if focus then
-		self._mouseFocusSet[buttonN] = true
-	end
-
-	updateLayoutIfNeeded(self) -- Updates hovered element.
-
-	local el = (focus or self._hoveredElement)
-	if el then
-		if el:trigger('mousedown',
-			x-el._layoutX-el._layoutOffsetX,
-			y-el._layoutY-el._layoutOffsetY,
-			buttonN)
-		then
-			return true -- Suppress default behavior.
-		end
-		local handled, grabFocus = el:_mouseDown(x, y, buttonN)
-		handled = (handled or el._captureInput or el._captureGuiInput or el:isSolid())
-		if handled then
-			if (grabFocus and not next(self._mouseFocusSet)) then
-				setMouseFocus(self, el, buttonN)
-			end
-			return true
-		end
-	end
-
-	return (focus ~= nil)
-end
-
--- handled = mouseMove( x, y )
-function Gui:mouseMove(x, y)
-	self._mouseX, self._mouseY = x, y
-
-	if not updateLayoutIfNeeded(self) then
-		updateHoveredElement(self) -- Make sure hovered element updates whenever mouse moves.
-	end
-
-	local focus = self._mouseFocus
-	if not focus then
-		return false
-	end
-
-	local el = (x and focus or self._hoveredElement)
-	if el then
-		el:_mouseMove(x, y)
-		el:trigger('mousemove',
-			x-el._layoutX-el._layoutOffsetX,
-			y-el._layoutY-el._layoutOffsetY)
-	end
-
-	return true
-end
-
--- handled = mouseUp( x, y, button )
-function Gui:mouseUp(x, y, buttonN)
-	self._mouseX, self._mouseY = x, y
-
-	local focus = self._mouseFocus
-	if not (focus and self._mouseFocusSet[buttonN]) then
-		return false
-	end
-
-	self._mouseFocusSet[buttonN] = nil
-
-	updateLayoutIfNeeded(self) -- Updates hovered element.
-
-	local el = (focus or self._hoveredElement)
-	if el then
-		el:_mouseUp(x, y, buttonN)
-	end
-
-	if not next(self._mouseFocusSet) then
-		setMouseFocus(self, nil)
-	end
-
-	if el then
-		el:trigger('mouseup',
-			x-el._layoutX-el._layoutOffsetX,
-			y-el._layoutY-el._layoutOffsetY,
-			buttonN)
-	end
-
-	return true
-end
-
--- handled = mouseWheel( dx, dy )
-function Gui:mouseWheel(dx, dy)
-	local isScroll = (dx ~= 0 or dy ~= 0)
-
-	-- Shift key swaps X and Y scrolling.
-	if love.keyboard.isDown('lshift','rshift') then
-		dx, dy = dy, dx
-	end
-
-	-- Focus
-	local focus = self._mouseFocus
-	if focus then
-		return (isScroll and focus:_mouseWheel(dx, dy) or focus:isSolid())
-	end
-
-	-- Hovered element (bubbling event)
-	updateLayoutIfNeeded(self) -- Updates hovered element.
-	local el, anyIsSolid = self._hoveredElement, false
-	while el do
-		if (isScroll and el:_mouseWheel(dx, dy)) then
-			return true
-		end
-		anyIsSolid = (anyIsSolid or el:isSolid())
-		el = el._parent
-	end
-	return anyIsSolid
-
 end
 
 
@@ -2742,40 +2747,40 @@ end
 
 
 
--- handled, grabFocus = _keyDown( key, scancode, isRepeat )
-function Cs.element:_keyDown(key, scancode, isRepeat)
+-- handled, grabFocus = _keypressed( key, scancode, isRepeat )
+function Cs.element:_keypressed(key, scancode, isRepeat)
 	return false, false
 end
 
--- _keyUp( key, scancode )
-function Cs.element:_keyUp(key, scancode)
+-- _keyreleased( key, scancode )
+function Cs.element:_keyreleased(key, scancode)
 	-- void
 end
 
--- _textInput( text )
-function Cs.element:_textInput(text)
+-- _textinput( text )
+function Cs.element:_textinput(text)
 	-- void
 end
 
 
 
--- handled, grabFocus = _mouseDown( x, y, button )
-function Cs.element:_mouseDown(x, y, buttonN)
+-- handled, grabFocus = _mousepressed( x, y, button )
+function Cs.element:_mousepressed(x, y, buttonN)
 	return false, false
 end
 
--- _mouseMove( x, y )
-function Cs.element:_mouseMove(x, y)
+-- _mousemoved( x, y )
+function Cs.element:_mousemoved(x, y)
 	-- void
 end
 
--- _mouseUp( x, y, button )
-function Cs.element:_mouseUp(x, y, buttonN)
+-- _mousereleased( x, y, button )
+function Cs.element:_mousereleased(x, y, buttonN)
 	-- void
 end
 
--- handled = _mouseWheel( deltaX, deltaY )
-function Cs.element:_mouseWheel(dx, dy)
+-- handled = _wheelmoved( deltaX, deltaY )
+function Cs.element:_wheelmoved(dx, dy)
 	return false
 end
 
@@ -3048,7 +3053,7 @@ function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
 			cb = nil
 		end
 	end)
-	menu:on('mousedown', function(button, event, x, y, buttonN)
+	menu:on('mousepressed', function(button, event, x, y, buttonN)
 		menu:close()
 	end)
 
@@ -3595,8 +3600,8 @@ end
 
 
 
--- REPLACE  handled = _mouseWheel( deltaX, deltaY )
-function Cs.container:_mouseWheel(dx, dy)
+-- REPLACE  handled = _wheelmoved( deltaX, deltaY )
+function Cs.container:_wheelmoved(dx, dy)
 	if (dx ~= 0 and self._maxWidth) or (dy ~= 0 and self._maxHeight) then
 		if self:scroll(self.SCROLL_SPEED_X*dx, self.SCROLL_SPEED_Y*dy) then
 			return true
@@ -4824,8 +4829,8 @@ end
 
 
 
--- REPLACE  handled, grabFocus = _mouseDown( x, y, button )
-function Cs.button:_mouseDown(x, y, buttonN)
+-- REPLACE  handled, grabFocus = _mousepressed( x, y, button )
+function Cs.button:_mousepressed(x, y, buttonN)
 	if buttonN == 1 then
 		if not self._active then
 			return true, false
@@ -4836,12 +4841,12 @@ function Cs.button:_mouseDown(x, y, buttonN)
 	return false, false
 end
 
--- -- REPLACE  _mouseMove( x, y )
--- function Cs.button:_mouseMove(x, y)
+-- -- REPLACE  _mousemoved( x, y )
+-- function Cs.button:_mousemoved(x, y)
 -- end
 
--- REPLACE  _mouseUp( x, y, button )
-function Cs.button:_mouseUp(x, y, buttonN)
+-- REPLACE  _mousereleased( x, y, button )
+function Cs.button:_mousereleased(x, y, buttonN)
 	if buttonN == 1 then
 		self._isPressed = false
 		if (x and self:isHovered()) then
@@ -5113,8 +5118,8 @@ end
 
 
 
--- REPLACE  handled, grabFocus = _keyDown( key, scancode, isRepeat )
-function Cs.input:_keyDown(key, scancode, isRepeat)
+-- REPLACE  handled, grabFocus = _keypressed( key, scancode, isRepeat )
+function Cs.input:_keypressed(key, scancode, isRepeat)
 	if key == 'escape' then
 		if not isRepeat then
 			self._field:setText(self._savedValue)
@@ -5128,24 +5133,24 @@ function Cs.input:_keyDown(key, scancode, isRepeat)
 			self:trigger('submit')
 		end
 	else
-		self._field:keyDown(key, scancode, isRepeat)
+		self._field:keypressed(key, scancode, isRepeat)
 	end
 	return true, false
 end
 
--- -- REPLACE  _keyUp( key, scancode )
--- function Cs.input:_keyUp(key, scancode)
+-- -- REPLACE  _keyreleased( key, scancode )
+-- function Cs.input:_keyreleased(key, scancode)
 -- end
 
--- REPLACE  _textInput( text )
-function Cs.input:_textInput(text)
-	self._field:textInput(text)
+-- REPLACE  _textinput( text )
+function Cs.input:_textinput(text)
+	self._field:textinput(text)
 end
 
 
 
--- REPLACE  handled, grabFocus = _mouseDown( x, y, button )
-function Cs.input:_mouseDown(x, y, buttonN)
+-- REPLACE  handled, grabFocus = _mousepressed( x, y, button )
+function Cs.input:_mousepressed(x, y, buttonN)
 	if not self._active then
 		return true, false
 	end
@@ -5155,18 +5160,18 @@ function Cs.input:_mouseDown(x, y, buttonN)
 	end
 	self:focus()
 	self._gui._mouseFocusSet[buttonN] = true
-	self._field:mouseDown(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
+	self._field:mousepressed(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
 	return true, false -- NOTE: We've set the focus ourselves
 end
 
--- REPLACE  _mouseMove( x, y )
-function Cs.input:_mouseMove(x, y)
-	self._field:mouseMove(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0)
+-- REPLACE  _mousemoved( x, y )
+function Cs.input:_mousemoved(x, y)
+	self._field:mousemoved(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0)
 end
 
--- REPLACE  _mouseUp( x, y, button )
-function Cs.input:_mouseUp(x, y, buttonN)
-	self._field:mouseUp(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
+-- REPLACE  _mousereleased( x, y, button )
+function Cs.input:_mousereleased(x, y, buttonN)
+	self._field:mousereleased(x-self._layoutX-themeGet(self._gui, 'inputIndentation'), 0, buttonN)
 end
 
 

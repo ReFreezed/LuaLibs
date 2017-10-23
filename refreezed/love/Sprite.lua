@@ -152,7 +152,7 @@ do
 			fName = debug.traceback('', depth-2):match(": in function '(.-)'") or '?'
 		end
 		local expects = table.concat({...}, ' or ', 1, typeCount)
-		printerror(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
+		error(("bad argument #%d to '%s' (%s expected, got %s)"):format(n, fName, expects, vType), depth)
 	end
 
 	function assertarg(fNameOrArgNum, ...)

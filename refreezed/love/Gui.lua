@@ -12,7 +12,7 @@
 --=  - refreezed.love.Sprite
 --=
 --=  TODO:
---=  - Make scrollbars draggable.
+--=  - Make scrollbar handles draggable.
 --=  - Make pageup/pagedown/home/end work in scrollables.
 --=  - Percentage sizes for elements.
 --=
@@ -141,14 +141,19 @@
 	- isType
 	- refresh
 	- remove
+	- reprocessTexts
 	- scrollIntoView
 	- setScissor
 	- showMenu
 	- updateLayout
 	- Event: beforedraw, afterdraw
-	- Event: close
+	- Event: close, closed
+	- Event: focused, blurred
 	- Event: keypressed
+	- Event: layout
 	- Event: mousepressed, mousemoved, mousereleased
+	- Event: navigated
+	- Event: pressed
 	- Event: refresh
 	- Event: show, hide
 	- Event: update
@@ -205,6 +210,7 @@
 
 		(widget)
 		- isActive, setActive
+		- Event: navigate
 
 			button
 			- getArrow
@@ -217,6 +223,7 @@
 			- press, isPressed
 			- setSprite
 			- Event: press
+			- Event: toggle
 
 			input
 			- focus, blur, isFocused
@@ -302,7 +309,7 @@ local copyTable
 local coroutineIterator, newIteratorCoroutine
 local drawImage
 local drawLayoutBackground
-local errorf, assertArg
+local errorf
 local F
 local getTextDimensions, getTextHeight
 local lerp
@@ -310,12 +317,15 @@ local matchAll
 local parseSelector, isElementMatchingSelectorPath
 local playSound, prepareSound
 local preprocessText
+local printf, printerror, assertarg
+local registerEvents
 local retrieve
 local reverseArray
 local round
 local setMouseFocus, setKeyboardFocus
 local setScissor
 local themeCallBack, themeGet, themeRender, themeRenderArea, themeGetSize
+local trigger
 local updateHoveredElement, validateNavigationTarget
 local updateLayout, updateLayoutIfNeeded, scheduleLayoutUpdateIfDisplayed
 local xywh
@@ -423,37 +433,6 @@ function errorf(i, s, ...)
 	else
 		error(i:format(s, ...), 2)
 	end
-end
-
--- value = assertArg( [ functionName=auto, ] argumentNumber, value, expectedValueType... [, depth=1 ] )
-do
-	local function assertArgTypes(fName, n, v, ...)
-		local vType = type(v)
-		local varargCount = select('#', ...)
-		local lastArg = select(varargCount, ...)
-		local hasDepthArg = (type(lastArg) == 'number')
-		local typeCount = varargCount+(hasDepthArg and -1 or 0)
-		for i = 1, typeCount do
-			if vType == select(i, ...) then
-				return v
-			end
-		end
-		local depth = 3+(hasDepthArg and lastArg or 1)
-		if not fName then
-			fName = debug.traceback('', depth-2):match(": in function '(.-)'") or '?'
-		end
-		local expects = table.concat({...}, ' or ', 1, typeCount)
-		errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
-	end
-
-	function assertArg(fNameOrArgNum, ...)
-		if type(fNameOrArgNum) == 'string' then
-			return assertArgTypes(fNameOrArgNum, ...)
-		else
-			return assertArgTypes(nil, fNameOrArgNum, ...)
-		end
-	end
-
 end
 
 
@@ -706,6 +685,77 @@ end
 
 
 
+-- printf( formatString, ... )
+function printf(s, ...)
+	print(s:format(...))
+end
+
+-- printerror( depth, formatString, ... )
+function printerror(depth, s, ...)
+
+	local time = require'socket'.gettime()
+	local timeStr = os.date('%H:%M:%S', time)
+	local msStr = F'%.3f'(time%1):sub(2)
+	printf('[%s%s] ERROR: '..s, timeStr, msStr, ...)
+
+	-- Traceback.
+	for line in debug.traceback('', 1+depth):gmatch'[^\n]+' do
+		local fileAndLine, inside = line:match'\t(%w.-): in (.+)'
+		if fileAndLine then
+			inside = inside:gsub('^function ', ''):gsub("^['<](.+)['>]$", '%1')
+			printf('\t%s  (%s)', fileAndLine, inside)
+		end
+	end
+
+	print()
+end
+
+-- value = assertarg( [ functionName=auto, ] argumentNumber, value, expectedValueType... [, depth=1 ] )
+do
+	local function assertArgTypes(fName, n, v, ...)
+		local vType = type(v)
+		local varargCount = select('#', ...)
+		local lastArg = select(varargCount, ...)
+		local hasDepthArg = (type(lastArg) == 'number')
+		local typeCount = varargCount+(hasDepthArg and -1 or 0)
+		for i = 1, typeCount do
+			if vType == select(i, ...) then
+				return v
+			end
+		end
+		local depth = 3+(hasDepthArg and lastArg or 1)
+		if not fName then
+			fName = debug.traceback('', depth-2):match(": in function '(.-)'") or '?'
+		end
+		local expects = table.concat({...}, ' or ', 1, typeCount)
+		error(("bad argument #%d to '%s' (%s expected, got %s)"):format(n, fName, expects, vType), depth)
+	end
+
+	function assertarg(fNameOrArgNum, ...)
+		if type(fNameOrArgNum) == 'string' then
+			return assertArgTypes(fNameOrArgNum, ...)
+		else
+			return assertArgTypes(nil, fNameOrArgNum, ...)
+		end
+	end
+
+end
+
+
+
+-- registerEvents( class, events )
+function registerEvents(C, events)
+	for i, event in ipairs(C._events) do
+		table.insert(events, i, event)
+	end
+	for i, event in ipairs(events) do
+		events[event] = true
+	end
+	C._events = events
+end
+
+
+
 -- retrieve( element, data, property1... )
 function retrieve(el, data, _k, ...)
 	local v = data[_k:sub(2)]
@@ -837,6 +887,18 @@ end
 
 
 
+-- value = trigger( element, event, ... )
+function trigger(el, event, ...)
+	local callbacks = el._callbacks
+	local cb = (callbacks[event] or callbacks['*'])
+	if not cb then
+		return nil
+	end
+	return cb(el, event, ...)
+end
+
+
+
 -- updateHoveredElement( gui )
 function updateHoveredElement(gui)
 	local el = (gui._mouseX and gui:getElementAt(gui._mouseX, gui._mouseY))
@@ -876,7 +938,7 @@ function updateLayout(el)
 	container:_updateLayoutPosition()
 	gui._layoutNeedsUpdate = false
 	for innerEl in container:traverseVisible() do
-		innerEl:trigger('layout')
+		trigger(innerEl, 'layout')
 	end
 	updateHoveredElement(gui)
 	return true
@@ -1214,9 +1276,9 @@ function Gui:update(dt)
 	if root then
 		root:_update(dt)
 		if root:isVisible() then
-			root:trigger('update', dt)
+			trigger(root, 'update', dt)
 			for el in root:traverseVisible() do
-				el:trigger('update', dt)
+				trigger(el, 'update', dt)
 			end
 		end
 	end
@@ -1279,7 +1341,7 @@ function Gui:keypressed(key, scancode, isRepeat)
 		return (el ~= nil)
 	end
 	if el then
-		if (not focus and el:trigger('keypressed', key, scancode, isRepeat)) then
+		if (not focus and trigger(el, 'keypressed', key, scancode, isRepeat)) then
 			return true
 		end
 		local handled, grabFocus = el:_keypressed(key, scancode, isRepeat)
@@ -1348,7 +1410,8 @@ function Gui:mousepressed(x, y, buttonN)
 
 	local el = (focus or self._hoveredElement)
 	if el then
-		if el:trigger('mousepressed',
+		if trigger(
+			el, 'mousepressed',
 			x-el._layoutX-el._layoutOffsetX,
 			y-el._layoutY-el._layoutOffsetY,
 			buttonN)
@@ -1384,7 +1447,8 @@ function Gui:mousemoved(x, y)
 	local el = (x and focus or self._hoveredElement)
 	if el then
 		el:_mousemoved(x, y)
-		el:trigger('mousemoved',
+		trigger(
+			el, 'mousemoved',
 			x-el._layoutX-el._layoutOffsetX,
 			y-el._layoutY-el._layoutOffsetY)
 	end
@@ -1415,7 +1479,8 @@ function Gui:mousereleased(x, y, buttonN)
 	end
 
 	if el then
-		el:trigger('mousereleased',
+		trigger(
+			el, 'mousereleased',
 			x-el._layoutX-el._layoutOffsetX,
 			y-el._layoutY-el._layoutOffsetY,
 			buttonN)
@@ -1475,8 +1540,8 @@ end
 
 -- defineStyle( styleName, styleData )
 function Gui:defineStyle(styleName, styleData)
-	assertArg(1, styleName, 'string')
-	assertArg(2, styleData, 'table')
+	assertarg(1, styleName, 'string')
+	assertarg(2, styleData, 'table')
 	self._styles[styleName] = styleData
 end
 
@@ -1538,7 +1603,7 @@ end
 
 -- sound = getDefaultSound( soundKey )
 function Gui:getDefaultSound(soundK)
-	assertArg(1, soundK, 'string')
+	assertarg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	return self._defaultSounds[soundK]
 end
@@ -1547,7 +1612,7 @@ end
 -- setDefaultSound( soundKey, nil ) -- remove sound
 -- Note: 'sound' is the value sent to the GUI sound player callback
 function Gui:setDefaultSound(soundK, sound)
-	assertArg(1, soundK, 'string')
+	assertarg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	self._defaultSounds[soundK] = sound
 end
@@ -1731,7 +1796,7 @@ do
 
 		updateLayoutIfNeeded(self)
 
-		if nav:trigger('navigate', targetAng) then
+		if trigger(nav, 'navigate', targetAng) then
 			return self._navigationTarget -- Suppress default behavior.
 		end
 
@@ -1875,12 +1940,7 @@ Gui:def'_textPreprocessor'
 function Gui:reprocessTexts()
 	local root = self._root
 	if root then
-		for el in root:traverseType'leaf' do
-			el:setText(el._unprocessedText)
-			if el:is(Cs.button) then
-				el:setText2(el._unprocessedText2)
-			end
-		end
+		root:reprocessTexts()
 	end
 end
 
@@ -1891,7 +1951,7 @@ Gui:defget'_theme'
 
 -- setTheme( theme )
 function Gui:setTheme(theme)
-	assertArg(1, theme, 'table','nil')
+	assertarg(1, theme, 'table','nil')
 	if self._theme == theme then  return  end
 	self._theme = theme
 	self._layoutNeedsUpdate = true
@@ -2002,6 +2062,8 @@ end
 
 Cs.element = newClass('GuiElement', {
 
+	--[[STATIC]] _events = {},
+
 	_callbacks = nil,
 	_gui = nil,
 	_layoutExpandablesX = 0, _layoutExpandablesY = 0,
@@ -2032,6 +2094,19 @@ Cs.element = newClass('GuiElement', {
 
 	data = nil,
 
+})
+registerEvents(Cs.element, {
+	'beforedraw','afterdraw',
+	'close','closed',
+	'focused','blurred',
+	'keypressed',
+	'layout',
+	'mousepressed','mousemoved','mousereleased',
+	'navigated',
+	'pressed',
+	'refresh',
+	'show','hide',
+	'update',
 })
 
 function Cs.element:init(gui, data, parent)
@@ -2118,9 +2193,9 @@ end
 -- _draw( )
 function Cs.element:_draw()
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 	drawLayoutBackground(self)
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 end
 
 -- _drawDebug( red, green, blue [, backgroundOpacity=1 ] )
@@ -2194,7 +2269,7 @@ function Cs.element:close()
 		return false
 	end
 	local preparedSound = prepareSound(self, 'close')
-	if self:trigger('close') then
+	if trigger(self, 'close') then
 		return false -- Suppress default behavior.
 	end
 	preparedSound()
@@ -2264,6 +2339,12 @@ end
 
 -- setCallback( event, callback )
 function Cs.element:setCallback(event, cb)
+	assertarg(1, event, 'string')
+	assertarg(2, cb, 'function','nil')
+	if not self._events[event] then
+		printerror(2, 'Unknown event %q.', event)
+		return
+	end
 	self._callbacks[event] = cb
 end
 
@@ -2278,19 +2359,24 @@ end
 
 -- value = trigger( event [, extraArguments... ] )
 function Cs.element:trigger(event, ...)
-	local callbacks = self._callbacks
-	local cb = callbacks[event] or callbacks['*']
-	if cb then
-		return cb(self, event, ...)
+	assertarg(1, event, 'string')
+	if not self._events[event] then
+		printerror(2, 'Unknown event %q.', event)
+		return nil
 	end
-	return nil
+	return trigger(self, event, ...)
 end
 
 -- triggerBubbling( event [, extraArguments... ] )
-function Cs.element:triggerBubbling(...)
+function Cs.element:triggerBubbling(event, ...)
+	assertarg(1, event, 'string')
+	if not self._events[event] then
+		printerror(2, 'Unknown event %q.', event)
+		return
+	end
 	local el = self
 	repeat
-		local returnV = el:trigger(...)
+		local returnV = trigger(el, event, ...)
 		el = el._parent
 	until (returnV or not el)
 end
@@ -2326,7 +2412,7 @@ end
 
 -- oldDataTable = swapData( newDataTable )
 function Cs.element:swapData(data)
-	assertArg(1, data, 'table')
+	assertarg(1, data, 'table')
 	local oldData = self._data
 	self._data, self.data = data, data
 	return oldData
@@ -2679,14 +2765,14 @@ end
 
 -- sound = getSound( soundKey )
 function Cs.element:getSound(soundK)
-	assertArg(1, soundK, 'string')
+	assertarg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	return self._sounds[soundK]
 end
 
 -- sound = getResultingSound( soundKey )
 function Cs.element:getResultingSound(soundK)
-	assertArg(1, soundK, 'string')
+	assertarg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	local sound = self._sounds[soundK]
 	if sound == nil then
@@ -2712,7 +2798,7 @@ end
 -- setSound( soundKey, sound )
 -- setSound( soundKey, nil ) -- remove sound
 function Cs.element:setSound(soundK, sound)
-	assertArg(1, soundK, 'string')
+	assertarg(1, soundK, 'string')
 	checkValidSoundKey(soundK)
 	self._sounds[soundK] = sound
 end
@@ -2869,7 +2955,7 @@ function Cs.element:setHidden(state)
 
 	scheduleLayoutUpdateIfDisplayed(self._parent or self)
 
-	self:trigger(state and 'hide' or 'show')
+	trigger(self, (state and 'hide' or 'show'))
 	return true
 end
 
@@ -2941,7 +3027,7 @@ end
 -- Trigger helper event "refresh"
 -- refresh( )
 function Cs.element:refresh()
-	self:trigger('refresh')
+	trigger(self, 'refresh')
 end
 
 
@@ -2959,6 +3045,13 @@ function Cs.element:remove()
 	if parent then
 		parent:remove(parent:indexOf(self))
 	end
+end
+
+
+
+-- reprocessTexts( )
+function Cs.element:reprocessTexts()
+	-- void
 end
 
 
@@ -3032,7 +3125,7 @@ end
 -- callback = function( index, itemText )
 --    index will be 0 if no item was chosen.
 function Cs.element:showMenu(items, highlightI, offsetX, offsetY, cb)
-	assertArg(1, items, 'table')
+	assertarg(1, items, 'table')
 
 	-- showMenu( items, highlightedIndex, offsetX, offsetY, callback )
 	if (type(highlightI) == 'number' and type(offsetX) == 'number' and type(offsetY) == 'number') then
@@ -3158,6 +3251,8 @@ Cs.container = Cs.element:extend('GuiContainer', {
 	_solid = false,
 
 })
+registerEvents(Cs.container, {
+})
 
 function Cs.container:init(gui, data, parent)
 	Cs.container.super.init(self, gui, data, parent)
@@ -3199,7 +3294,7 @@ function Cs.container:_draw()
 	local sbW = themeGet(gui, 'scrollbarWidth')
 	local sbMinW = themeGet(gui, 'scrollbarMinLength')
 
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 	drawLayoutBackground(self)
 	self:_drawDebug(0, 0, 255)
 
@@ -3209,7 +3304,7 @@ function Cs.container:_draw()
 	end
 	if maxW or maxH then  setScissor(gui, nil)  end
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 	-- Draw scrollbars.
 	if maxW then
@@ -3406,8 +3501,8 @@ end
 
 -- scrollChanged = setScroll( x, y )
 function Cs.container:setScroll(scrollX, scrollY)
-	assertArg(1, scrollX, 'number')
-	assertArg(2, scrollY, 'number')
+	assertarg(1, scrollX, 'number')
+	assertarg(2, scrollY, 'number')
 
 	updateLayoutIfNeeded(self._gui)
 
@@ -3666,6 +3761,16 @@ end
 
 
 
+-- OVERRIDE  reprocessTexts( )
+function Cs.container:reprocessTexts()
+	Cs.container.super.reprocessTexts(self)
+	for leaf in self:traverseType'leaf' do
+		leaf:reprocessTexts()
+	end
+end
+
+
+
 -- setChildrenActive( state )
 function Cs.container:setChildrenActive(state)
 	for _, child in ipairs(self) do
@@ -3717,7 +3822,7 @@ end
 
 -- sort( sortFunction )
 function Cs.container:sort(f)
-	assertArg(1, f, 'function')
+	assertarg(1, f, 'function')
 	table.sort(self, f)
 	scheduleLayoutUpdateIfDisplayed(self)
 end
@@ -3875,6 +3980,8 @@ Cs.bar = Cs.container:extend('GuiBar', {
 	_expandChildren = true,
 	_homogeneous = false,
 })
+registerEvents(Cs.bar, {
+})
 
 function Cs.bar:init(gui, data, parent)
 	Cs.bar.super.init(self, gui, data, parent)
@@ -3893,6 +4000,8 @@ end
 
 
 Cs.hbar = Cs.bar:extend('GuiHorizontalBar', {
+})
+registerEvents(Cs.hbar, {
 })
 
 -- function Cs.hbar:init(gui, data, parent)
@@ -3996,6 +4105,8 @@ end
 
 Cs.vbar = Cs.bar:extend('GuiVerticalBar', {
 })
+registerEvents(Cs.vbar, {
+})
 
 -- function Cs.vbar:init(gui, data, parent)
 -- 	Cs.vbar.super.init(self, gui, data, parent)
@@ -4097,6 +4208,8 @@ end
 Cs.root = Cs.container:extend('GuiRoot', {
 	--[[REPLACE]] _width = 0, _height = 0,
 })
+registerEvents(Cs.root, {
+})
 
 -- function Cs.root:init(gui, data, parent)
 -- 	Cs.root.super.init(self, gui, data, parent)
@@ -4109,7 +4222,7 @@ function Cs.root:_draw()
 	if self._hidden then  return  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
@@ -4119,7 +4232,7 @@ function Cs.root:_draw()
 		child:_draw()
 	end
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -4127,8 +4240,8 @@ end
 
 -- REPLACE  setDimensions( width, height )
 function Cs.root:setDimensions(w, h)
-	assertArg(1, w, 'number')
-	assertArg(2, h, 'number')
+	assertarg(1, w, 'number')
+	assertarg(2, h, 'number')
 	if (self._width == w and self._height == h) then
 		return
 	end
@@ -4175,6 +4288,8 @@ Cs.leaf = Cs.element:extend('GuiLeaf', {
 	_text = '',
 	_textColor = nil,
 
+})
+registerEvents(Cs.leaf, {
 })
 
 function Cs.leaf:init(gui, data, parent)
@@ -4307,6 +4422,14 @@ end
 
 
 
+-- OVERRIDE  reprocessTexts( )
+function Cs.leaf:reprocessTexts()
+	Cs.leaf.super.reprocessTexts(self)
+	self:setText(self._unprocessedText)
+end
+
+
+
 --==============================================================
 --= Canvas =====================================================
 --==============================================================
@@ -4317,6 +4440,9 @@ Cs.canvas = Cs.leaf:extend('GuiCanvas', {
 
 	_canvasBackgroundColor = nil,
 
+})
+registerEvents(Cs.canvas, {
+	'draw',
 })
 
 function Cs.canvas:init(gui, data, parent)
@@ -4336,12 +4462,12 @@ function Cs.canvas:_draw()
 	if gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
 	-- Draw canvas.
-	-- We don't call themeRender() for canvases as they should only draw things though the "draw" event.
+	-- We don't call themeRender() for canvases as they should only draw things through the "draw" event.
 	local cw, ch = (self._width or w), (self._height or h)
 	if (cw > 0 and ch > 0) then
 
@@ -4356,7 +4482,7 @@ function Cs.canvas:_draw()
 		LG.translate(cx, cy)
 		LG.setColor(255, 255, 255)
 
-		self:trigger('draw', cw, ch)
+		trigger(self, 'draw', cw, ch)
 		if gui._elementScissorIsSet then
 			setScissor(gui, nil)
 			gui._elementScissorIsSet = false
@@ -4365,7 +4491,7 @@ function Cs.canvas:_draw()
 		setScissor(gui, nil)
 	end
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -4399,6 +4525,8 @@ Cs.image = Cs.leaf:extend('GuiImage', {
 	_imageScaleX = 1.0, _imageScaleY = 1.0,
 	_sprite = nil,
 
+})
+registerEvents(Cs.image, {
 })
 
 function Cs.image:init(gui, data, parent)
@@ -4435,7 +4563,7 @@ function Cs.image:_draw()
 	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
@@ -4449,7 +4577,7 @@ function Cs.image:_draw()
 	local imageBgColor = self._imageBackgroundColor
 	themeRender(self, 'image', image, quad, iw*sx, ih*sy, sx, sy, imageColor, imageBgColor)
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -4489,8 +4617,8 @@ Cs.image:defget'_imageScaleY'
 
 -- setImageScale( scaleX [, scaleY=scaleX ] )
 function Cs.image:setImageScale(sx, sy)
-	assertArg(1, sx, 'number')
-	assertArg(2, sy, 'number','nil')
+	assertarg(1, sx, 'number')
+	assertarg(2, sy, 'number','nil')
 	sy = (sy or sx)
 	if (self._imageScaleX == sx and self._imageScaleY == sy) then
 		return
@@ -4504,7 +4632,7 @@ end
 
 -- setImageScaleX( scaleX )
 function Cs.image:setImageScaleX(sx)
-	assertArg(1, sx, 'number')
+	assertarg(1, sx, 'number')
 	if self._imageScaleX == sx then  return  end
 	self:setImageScale(sx, self._imageScaleY)
 	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
@@ -4512,7 +4640,7 @@ end
 
 -- setImageScaleY( scaleY )
 function Cs.image:setImageScaleY(sy)
-	assertArg(1, sy, 'number')
+	assertarg(1, sy, 'number')
 	if self._imageScaleY == sy then  return  end
 	self:setImageScale(self._imageScaleY, sy)
 	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
@@ -4522,7 +4650,7 @@ end
 
 -- setSprite( sprite )
 function Cs.image:setSprite(sprite)
-	assertArg(1, sprite, 'table','string','nil')
+	assertarg(1, sprite, 'table','string','nil')
 
 	if type(sprite) == 'string' then
 		local spriteLoader = self._gui._spriteLoader
@@ -4568,7 +4696,11 @@ end
 
 
 Cs.text = Cs.leaf:extend('GuiText', {
+
 	_textWrapLimit = nil,
+
+})
+registerEvents(Cs.text, {
 })
 
 function Cs.text:init(gui, data, parent)
@@ -4586,7 +4718,7 @@ function Cs.text:_draw()
 	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
@@ -4594,7 +4726,7 @@ function Cs.text:_draw()
 	LG.setFont(self:getFont())
 	themeRender(self, 'text', self._text, self._textWidth, self._textHeight, self._textWrapLimit, self._align, textColor)
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -4630,6 +4762,9 @@ Cs.widget = Cs.leaf:extend('GuiWidget', {
 	_active = true,
 	_priority = 0,
 
+})
+registerEvents(Cs.widget, {
+	'navigate',
 })
 
 function Cs.widget:init(gui, data, parent)
@@ -4682,6 +4817,10 @@ Cs.button = Cs.widget:extend('GuiButton', {
 	_toggled = false,
 
 })
+registerEvents(Cs.button, {
+	'press',
+	'toggle',
+})
 
 function Cs.button:init(gui, data, parent)
 	Cs.button.super.init(self, gui, data, parent)
@@ -4727,7 +4866,7 @@ function Cs.button:_draw()
 	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
@@ -4742,7 +4881,7 @@ function Cs.button:_draw()
 		image, quad, iw*self._imageScaleX, ih*self._imageScaleY,
 		sx, sy, (self._imageColor or COLOR_WHITE), self._imageBackgroundColor, self._imagePadding)
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -4786,8 +4925,8 @@ Cs.button:defget'_imageScaleY'
 
 -- setImageScale( scaleX [, scaleY=scaleX ] )
 function Cs.button:setImageScale(sx, sy)
-	assertArg(1, sx, 'number')
-	assertArg(2, sy, 'number','nil')
+	assertarg(1, sx, 'number')
+	assertarg(2, sy, 'number','nil')
 	sy = (sy or sx)
 	if (self._imageScaleX == sx and self._imageScaleY == sy) then
 		return
@@ -4801,7 +4940,7 @@ end
 
 -- setImageScaleX( scaleX )
 function Cs.button:setImageScaleX(sx)
-	assertArg(1, sx, 'number')
+	assertarg(1, sx, 'number')
 	if self._imageScaleX == sx then  return  end
 	self:setImageScale(sx, self._imageScaleY)
 	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
@@ -4809,7 +4948,7 @@ end
 
 -- setImageScaleY( scaleY )
 function Cs.button:setImageScaleY(sy)
-	assertArg(1, sy, 'number')
+	assertarg(1, sy, 'number')
 	if self._imageScaleY == sy then  return  end
 	self:setImageScale(self._imageScaleY, sy)
 	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
@@ -4878,7 +5017,7 @@ function Cs.button:setToggled(state)
 		return
 	end
 	self._toggled = state
-	self:trigger('toggle')
+	trigger(self, 'toggle')
 end
 
 
@@ -4931,9 +5070,9 @@ function Cs.button:press(ignoreActiveState)
 		self._toggled = (not self._toggled)
 	end
 	self._gui._ignoreKeyboardInputThisFrame = true
-	self:trigger('press')
+	trigger(self, 'press')
 	if self._canToggle then
-		self:trigger('toggle')
+		trigger(self, 'toggle')
 	end
 	self:triggerBubbling('pressed', self)
 
@@ -4965,9 +5104,17 @@ end
 
 
 
+-- OVERRIDE  reprocessTexts( )
+function Cs.button:reprocessTexts()
+	Cs.button.super.reprocessTexts(self)
+	self:setText2(self._unprocessedText2)
+end
+
+
+
 -- setSprite( sprite )
 function Cs.button:setSprite(sprite)
-	assertArg(1, sprite, 'table','string','nil')
+	assertarg(1, sprite, 'table','string','nil')
 
 	if type(sprite) == 'string' then
 		local spriteLoader = self._gui._spriteLoader
@@ -5032,6 +5179,10 @@ Cs.input = Cs.widget:extend('GuiInput', {
 	_placeholder = '',
 
 })
+registerEvents(Cs.input, {
+	'change',
+	'submit',
+})
 
 function Cs.input:init(gui, data, parent)
 	Cs.input.super.init(self, gui, data, parent)
@@ -5067,7 +5218,7 @@ function Cs.input:_draw()
 	if self._gui.debug then  return self:_drawDebug(255, 0, 0)  end
 
 	local x, y, w, h = xywh(self)
-	self:trigger('beforedraw', x, y, w, h)
+	trigger(self, 'beforedraw', x, y, w, h)
 
 	drawLayoutBackground(self)
 
@@ -5075,7 +5226,7 @@ function Cs.input:_draw()
 	LG.setFont(font)
 	themeRender(self, 'input', self:getVisibleValue(), font:getHeight())
 
-	self:trigger('afterdraw', x, y, w, h)
+	trigger(self, 'afterdraw', x, y, w, h)
 
 end
 
@@ -5124,7 +5275,7 @@ function Cs.input:blur()
 
 	local v = self:getValue()
 	if v ~= self._savedValue then
-		self:trigger('change', v)
+		trigger(self, 'change', v)
 	end
 
 	self:triggerBubbling('blurred', self)
@@ -5174,6 +5325,9 @@ end
 
 -- REPLACE  handled, grabFocus = _keypressed( key, scancode, isRepeat )
 function Cs.input:_keypressed(key, scancode, isRepeat)
+	if not self:isKeyboardFocus() then
+		return false, false
+	end
 	if key == 'escape' then
 		if not isRepeat then
 			self._field:setText(self._savedValue)
@@ -5184,7 +5338,7 @@ function Cs.input:_keypressed(key, scancode, isRepeat)
 		if not isRepeat then
 			self:blur()
 			playSound(self, 'inputsubmit')
-			self:trigger('submit')
+			trigger(self, 'submit')
 		end
 	else
 		self._field:keypressed(key, scancode, isRepeat)

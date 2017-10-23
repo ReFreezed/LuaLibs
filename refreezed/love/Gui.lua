@@ -813,7 +813,9 @@ function themeRenderArea(el, what, areaX, areaY, areaW, areaH, ...)
 	local gui = el._gui
 
 	LG.push('all')
-	LG.translate(el._layoutX+el._layoutOffsetX+areaX, el._layoutY+el._layoutOffsetY+areaY)
+	LG.translate(
+		round(el._layoutX+el._layoutOffsetX+areaX),
+		round(el._layoutY+el._layoutOffsetY+areaY))
 
 	themeCallBack(gui, 'draw', what, el, areaW, areaH, ...)
 	if gui._elementScissorIsSet then

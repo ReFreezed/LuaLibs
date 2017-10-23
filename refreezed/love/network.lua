@@ -4,7 +4,7 @@
 --=
 --=  Dependencies:
 --=  - LÖVE 0.9.0
---=  - rxi.json
+--=  - refreezed.luaData
 --=
 --=-------------------------------------------------------------
 --=
@@ -70,9 +70,10 @@
 
 
 
-local enet   = require('enet') -- (LÖVE)
-local socket = require('socket') -- (LÖVE)
-local json   = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
+local enet    = require('enet') -- LÖVE.
+local socket  = require('socket') -- LÖVE.
+local luaData = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.luaData') -- In parent folder.
+-- local json    = require((('.'..(...)):gsub('%.init$', ''):gsub('%.%w+%.%w+%.%w+$', '')..'.rxi.json'):gsub('^%.+', '')) -- (grandparent folder)
 
 local network = {
 	_VERSION = 1,
@@ -183,17 +184,17 @@ end
 
 
 -- encodedData, errorMessage = encode( data )
-function encode(data)
-	local ok, encodedDataOrErr = pcall(json.encode, data)
-	if not ok then
-		return nil, encodedDataOrErr
-	end
-	return encodedDataOrErr
-end
+encode = luaData.encode
+-- function encode(data)
+-- 	local ok, encodedDataOrErr = pcall(json.encode, data)
+-- 	if not ok then  return nil, encodedDataOrErr  end
+-- 	return encodedDataOrErr
+-- end
 
 -- data, errorMessage = decode( encodedData )
 function decode(encodedData)
-	local ok, dataOrErr = pcall(json.decode, encodedData)
+	local ok, dataOrErr = luaData.decode(encodedData)
+	-- local ok, dataOrErr = pcall(json.decode, encodedData)
 	if not ok then
 		return nil, dataOrErr
 	end

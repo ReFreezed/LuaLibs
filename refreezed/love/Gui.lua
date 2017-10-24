@@ -200,7 +200,7 @@
 		- Event: draw
 
 		image
-		- Mixin: imageMixin
+		- Includes: imageMixin
 
 		text
 
@@ -209,7 +209,7 @@
 		- Event: navigate
 
 			button
-			- Mixin: imageMixin
+			- Includes: imageMixin
 			- getArrow
 			- getText2, getUnprocessedText2, setText2
 			- isToggled, setToggled
@@ -227,7 +227,7 @@
 
 
 
-	Mixins
+	Includes
 	----------------------------------------------------------------
 
 	imageMixin
@@ -391,7 +391,7 @@ function checkValidSoundKey(soundK)
 		table.insert(keys, soundK)
 	end
 	table.sort(keys)
-	errorf(2, 'bad sound key %q (must be any of "%s")', tostring(soundK), table.concat(keys, '", "'))
+	errorf(2, 'Bad sound key %q. (Must be any of "%s".)', soundK, table.concat(keys, '", "'))
 end
 
 
@@ -762,20 +762,17 @@ end
 
 
 
--- text = preprocessText( gui, text, el )
-function preprocessText(gui, text, el)
-	if text == '' then
-		return ''
-	end
+-- text = preprocessText( gui, text, el, hasMnemonics )
+function preprocessText(gui, unprocessedText, el, hasMnemonics)
+	if unprocessedText == '' then return '' end
+
 	local preprocessor = gui._textPreprocessor
-	if not preprocessor then
-		return text
-	end
-	local processedText = preprocessor(text, el)
-	if processedText == nil then
-		return text
-	end
-	return tostring(processedText)
+	if not preprocessor then return unprocessedText end
+
+	local text = preprocessor(unprocessedText, el, hasMnemonics)
+	if text == nil then return unprocessedText end
+
+	return tostring(text)
 end
 
 
@@ -2039,10 +2036,15 @@ end
 
 
 
--- textPreprocessor = getTextPreprocessor( )
+-- getTextPreprocessor
+Gui:defget'_textPreprocessor'
+
 -- setTextPreprocessor( textPreprocessor )
--- text = textPreprocessor( text, element )
-Gui:def'_textPreprocessor'
+-- text = textPreprocessor( text, element, mnemonicsAreEnabled )
+function Gui:setTextPreprocessor(f)
+	assertarg(1, f, 'function','nil')
+	self._textPreprocessor = f
+end
 
 -- Manually re-preprocess texts. Useful if e.g. the program's language changed.
 -- reprocessTexts( )
@@ -2325,7 +2327,7 @@ Cs.element = class('GuiElement', {
 	_originX = 0.0, _originY = 0.0, -- where in the parent to base x and y off
 	_sounds = nil,
 	_tags = nil,
-	_tooltip = '',
+	_tooltip = '', _unprocessedTooltip = '',
 	_width = nil, _height = nil,
 	_x = 0, _y = 0, -- offset from origin
 
@@ -2371,7 +2373,7 @@ function Cs.element:init(gui, data, parent)
 	retrieve(self, data, '_originX', '_originY')
 	-- retrieve(self, data, '_sounds')
 	-- retrieve(self, data, '_tags')
-	retrieve(self, data, '_tooltip')
+	-- retrieve(self, data, '_tooltip')
 	retrieve(self, data, '_width', '_height')
 	retrieve(self, data, '_x', '_y')
 
@@ -2379,6 +2381,13 @@ function Cs.element:init(gui, data, parent)
 	assert(data.data == nil or type(data.data) == 'table')
 	self._data = (data.data or {})
 	self.data = self._data -- element.data is exposed for easy access
+
+	-- Make sure the element has an ID
+	if self._id == '' then
+		local numId = gui._lastAutomaticId+1
+		gui._lastAutomaticId = numId
+		self._id = '__'..numId
+	end
 
 	-- Set sounds table
 	self._sounds = {}
@@ -2399,11 +2408,8 @@ function Cs.element:init(gui, data, parent)
 		end
 	end
 
-	-- Make sure the element has an ID
-	if self._id == '' then
-		local numId = gui._lastAutomaticId+1
-		gui._lastAutomaticId = numId
-		self._id = '__'..numId
+	if data.tooltip ~= nil then
+		self:setTooltip(data.tooltip)
 	end
 
 	-- Set initial offset
@@ -3042,8 +3048,20 @@ end
 
 
 
--- getTooltip, setTooltip
-Cs.element:def'_tooltip'
+-- getTooltip
+Cs.element:defget'_tooltip'
+
+-- setTooltip( text )
+function Cs.element:setTooltip(unprocessedText)
+	unprocessedText = tostring(unprocessedText == nil and '' or unprocessedText)
+
+	local text = preprocessText(self._gui, unprocessedText, self, false)
+	if self._tooltip == text then return end
+
+	self._tooltip = text
+	self._unprocessedTooltip = unprocessedText
+
+end
 
 
 
@@ -3288,7 +3306,7 @@ end
 
 -- reprocessTexts( )
 function Cs.element:reprocessTexts()
-	-- void
+	self:setTooltip(self._unprocessedTooltip)
 end
 
 
@@ -4001,8 +4019,8 @@ end
 -- OVERRIDE  reprocessTexts( )
 function Cs.container:reprocessTexts()
 	Cs.container.super.reprocessTexts(self)
-	for leaf in self:traverseType'leaf' do
-		leaf:reprocessTexts()
+	for _, child in ipairs(self) do
+		child:reprocessTexts()
 	end
 end
 
@@ -4574,14 +4592,11 @@ Cs.leaf:defget'_text'
 Cs.leaf:defget'_unprocessedText'
 
 -- setText( text )
-function Cs.leaf:setText(text)
-	text = tostring(text)
+function Cs.leaf:setText(unprocessedText)
+	unprocessedText = tostring(unprocessedText == nil and '' or unprocessedText)
 
-	local unprocessedText = text
-	text = preprocessText(self._gui, text, self)
-	if self._text == text then
-		return
-	end
+	local text = preprocessText(self._gui, unprocessedText, self, self._mnemonics)
+	if self._text == text then return end
 
 	-- Check text for mnemonics (using "&").
 	self._mnemonicPosition = nil
@@ -4603,7 +4618,8 @@ function Cs.leaf:setText(text)
 		text = cleanText
 	end
 
-	self._text, self._unprocessedText = text, unprocessedText
+	self._text = text
+	self._unprocessedText = unprocessedText
 
 	local oldW = self._textWidth
 	self._textWidth = self:getFont():getWidth(text)
@@ -5064,16 +5080,14 @@ function Cs.button:setText(text)
 end
 
 -- setText2( text )
-function Cs.button:setText2(text)
-	text = tostring(text)
+function Cs.button:setText2(unprocessedText)
+	unprocessedText = tostring(unprocessedText == nil and '' or unprocessedText)
 
-	local unprocessedText = text
-	text = preprocessText(self._gui, text, self)
-	if self._text2 == text then
-		return
-	end
+	local text = preprocessText(self._gui, unprocessedText, self, false)
+	if self._text2 == text then return end
 
-	self._text2, self._unprocessedText2 = text, unprocessedText
+	self._text2 = text
+	self._unprocessedText2 = unprocessedText
 
 	local oldW = self._textWidth
 	self._textWidth2 = self:getFont():getWidth(text)

@@ -10,7 +10,6 @@
 --=  - refreezed.love.InputField
 --=
 --=  TODO:
---=  - Enable automatic image switching in checkbox-like buttons.
 --=  - Make scrollbar handles draggable.
 --=  - Make pageup/pagedown/home/end work in scrollables.
 --=  - Percentage sizes for elements.
@@ -2260,10 +2259,6 @@ function Ms.imageMixin:setSprite(imageOrName, frames)
 		image, frames = spriteLoader(spriteName)
 		if not image then
 			printerror(2, 'The sprite loader did not return a required image for sprite name %q.', spriteName)
-			return
-		end
-		if not image then
-			printerror(2, 'The sprite loader did not return a required frames table for sprite name %q.', spriteName)
 			return
 		end
 
@@ -4977,6 +4972,7 @@ Cs.button = Cs.widget:extend('GuiButton', {
 	_imagePadding = 0,
 	_text2 = '',
 	_toggled = false,
+	_toggledSprite = nil, _untoggledSprite = nil,
 
 })
 applyMixin(Cs.button, Ms.imageMixin)
@@ -4998,11 +4994,18 @@ function Cs.button:init(gui, data, parent)
 	-- retrieve(self, data, '_sprite')
 	-- retrieve(self, data, '_text2')
 	retrieve(self, data, '_toggled')
+	retrieve(self, data, '_toggledSprite','_untoggledSprite')
 
 	self._imageScaleX = (self._imageScaleX or data.imageScale or 1)
 	self._imageScaleY = (self._imageScaleY or data.imageScale or 1)
 
-	self:setSprite(data.sprite)
+	if data.sprite then
+		self:setSprite(data.sprite)
+	elseif (self._toggledSprite and self._toggled) then
+		self:setSprite(self._toggledSprite)
+	elseif (self._untoggledSprite and not self._toggled) then
+		self:setSprite(self._untoggledSprite)
+	end
 
 	if data.text2 ~= nil then
 		self:setText2(data.text2)
@@ -5107,11 +5110,18 @@ end
 
 -- setToggled( state )
 function Cs.button:setToggled(state)
-	if self._toggled == state then
-		return
-	end
+	if self._toggled == state then return end
+
 	self._toggled = state
+
+	if (state and self._toggledSprite) then
+		self:setSprite(self._toggledSprite)
+	elseif (not state and self._untoggledSprite) then
+		self:setSprite(self._untoggledSprite)
+	end
+
 	trigger(self, 'toggle')
+
 end
 
 
@@ -5161,7 +5171,13 @@ function Cs.button:press(ignoreActiveState)
 	-- Press/toggle the button
 	local preparedSound = prepareSound(self, 'press')
 	if self._canToggle then
-		self._toggled = (not self._toggled)
+		local state = (not self._toggled)
+		self._toggled = state
+		if (state and self._toggledSprite) then
+			self:setSprite(self._toggledSprite)
+		elseif (not state and self._untoggledSprite) then
+			self:setSprite(self._untoggledSprite)
+		end
 	end
 	self._gui._ignoreKeyboardInputThisFrame = true
 	trigger(self, 'press')

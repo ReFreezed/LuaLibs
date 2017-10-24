@@ -57,7 +57,7 @@ function Animation:init(name, image, loop, frames)
 	end
 	frames = (frames or {{}})
 
-	self.name = animName
+	self.name = name
 	self.image = image
 	self.loop = (loop ~= false)
 

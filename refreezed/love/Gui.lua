@@ -1,18 +1,15 @@
 --[[============================================================
 --=
---=  GuiLove v0.1
+--=  GuiLove v0.1 beta
 --=  - Written by Marcus 'ReFreezed' Thunström
 --=  - MIT License (See the bottom of this file)
 --=
 --=  Dependencies:
 --=  - LÖVE 0.10.2
 --=  - refreezed.class
---=  - refreezed.love.Animation (Used by Sprites.)
 --=  - refreezed.love.InputField
---=  - refreezed.love.Sprite
 --=
 --=  TODO:
---=  - Remove Sprite class dependance.
 --=  - Enable automatic image switching in checkbox-like buttons.
 --=  - Make scrollbar handles draggable.
 --=  - Make pageup/pagedown/home/end work in scrollables.
@@ -324,6 +321,7 @@ local F
 local getTextDimensions, getTextHeight
 local lerp
 local matchAll
+local newSprite, cloneSprite, getCurrentViewOfSprite, updateSprite
 local parseSelector, isElementMatchingSelectorPath
 local playSound, prepareSound
 local preprocessText
@@ -515,6 +513,77 @@ function matchAll(s, pat)
 		matches[i] = match
 	end
 	return matches
+end
+
+
+
+-- sprite = newSprite( image, frames )
+-- frames = { frame... }
+-- frame = { duration=duration, quad=quad }
+function newSprite(image, frames)
+
+	if not frames then
+		local iw, ih = image:getDimensions()
+		frames = {{duration=math.huge, quad=LG.newQuad(0, 0, iw, ih, iw, ih)}}
+
+	elseif not frames[1] then
+		errorf(2, 'The frames table is empty. We need at least one frame!')
+
+	end
+
+	local duration = 0
+	for _, frame in ipairs(frames) do
+		duration = duration+frame.duration
+	end
+
+	local sprite = {
+
+		image = image,
+
+		frames = frames,
+
+		width = image:getWidth(),
+		height = image:getHeight(),
+
+		length = #frames,
+		duration = duration,
+
+		currentFrame = 1,
+		currentTime = 0.0,
+
+	}
+
+	return sprite
+end
+
+-- clone = cloneSprite( sprite )
+function cloneSprite(sprite)
+	return newSprite(sprite.image, sprite.frames)
+end
+
+-- image, quad, width, height = getCurrentViewOfSprite( sprite )
+function getCurrentViewOfSprite(sprite)
+	local quad = sprite.frames[sprite.currentFrame].quad
+	local _, _, w, h = quad:getViewport()
+	return sprite.image, quad, w, h
+end
+
+-- updateSprite( sprite, deltaTime )
+function updateSprite(sprite, dt)
+
+	local frames = sprite.frames
+
+	local i = sprite.currentFrame
+	local time = sprite.currentTime+dt
+
+	while time >= frames[i].duration do
+		time = time-frames[i].duration
+		i = i%sprite.length+1
+	end
+
+	sprite.currentFrame = i
+	sprite.currentTime = time
+
 end
 
 
@@ -747,7 +816,7 @@ do
 				return v
 			end
 		end
-		local depth = 3+(hasDepthArg and lastArg or 1)
+		local depth = 2+(hasDepthArg and lastArg or 1)
 		if not fName then
 			fName = debug.traceback('', depth-2):match(": in function '(.-)'") or '?'
 		end
@@ -1898,7 +1967,7 @@ Gui:def'_soundPlayer'
 
 -- spriteLoader = getSpriteLoader( )
 -- setSpriteLoader( spriteLoader )
--- sprite = spriteLoader( spriteName )
+-- image, frames = spriteLoader( spriteName )
 Gui:def'_spriteLoader'
 
 
@@ -2108,10 +2177,8 @@ class.def(Ms.imageMixin, '_imageColor')
 -- width, height = getImageDimensions( )
 function Ms.imageMixin:getImageDimensions()
 	local sprite = self._sprite
-	if not sprite then
-		return 0, 0
-	end
-	return sprite:getDimensions()
+	if not sprite then return 0, 0 end
+	return sprite.width, sprite.height
 end
 
 
@@ -2137,9 +2204,7 @@ function Ms.imageMixin:setImageScale(sx, sy)
 	end
 	self._imageScaleX = sx
 	self._imageScaleY = sy
-	if self._sprite then
-		scheduleLayoutUpdateIfDisplayed(self)
-	end
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
 end
 
 -- setImageScaleX( scaleX )
@@ -2160,25 +2225,48 @@ end
 
 
 
--- setSprite( sprite )
-function Ms.imageMixin:setSprite(sprite)
-	assertarg(1, sprite, 'table','string','nil')
+-- setSprite( image [, frames=oneFrameShowingWholeImage ] )
+-- setSprite( spriteName )
+function Ms.imageMixin:setSprite(imageOrName, frames)
+	assertarg(1, imageOrName, 'userdata','string','nil')
 
-	if type(sprite) == 'string' then
+	local image = nil
+
+	if type(imageOrName) == 'string' then
+		local spriteName = imageOrName
 		local spriteLoader = self._gui._spriteLoader
-		sprite = (spriteLoader and spriteLoader(sprite))
+		if not spriteLoader then
+			printerror(2, 'There is no sprite loader to convert the sprite name %q to a sprite.', spriteName)
+			return
+		end
+		image, frames = spriteLoader(spriteName)
+		if not image then
+			printerror(2, 'The sprite loader did not return a required image for sprite name %q.', spriteName)
+			return
+		end
+		if not image then
+			printerror(2, 'The sprite loader did not return a required frames table for sprite name %q.', spriteName)
+			return
+		end
+
+	elseif imageOrName then
+		assertarg(2, frames, 'table','nil')
+		image = imageOrName
+
 	end
 
 	local oldIw, oldIh = 0, 0
 	if self._sprite then
-		oldIw, oldIh = self._sprite:getDimensions()
+		oldIw, oldIh = self._sprite.width, self._sprite.height
 	end
-	self._sprite = (sprite and sprite:clone())
+
+	self._sprite = (image and newSprite(image, frames))
 
 	local iw, ih = 0, 0
 	if self._sprite then
-		iw, ih = self._sprite:getDimensions()
+		iw, ih = self._sprite.width, self._sprite.height
 	end
+
 	if not (iw == oldIw and ih == oldIh) then
 		scheduleLayoutUpdateIfDisplayed(self)
 	end
@@ -4685,9 +4773,7 @@ end
 function Cs.image:_update(dt)
 	Cs.image.super._update(self, dt)
 	local sprite = self._sprite
-	if sprite then
-		sprite:update(dt)
-	end
+	if sprite then updateSprite(sprite, dt) end
 end
 
 
@@ -4704,8 +4790,7 @@ function Cs.image:_draw()
 
 	local image, quad, iw, ih = nil, nil, 0, 0
 	if self._sprite then
-		image, quad = self._sprite:getCurrentImage()
-		iw, ih = image:getDimensions()
+		image, quad, iw, ih = getCurrentViewOfSprite(self._sprite)
 	end
 	local sx, sy = self._imageScaleX, self._imageScaleY
 	local imageColor = (self._imageColor or COLOR_WHITE)
@@ -4899,9 +4984,7 @@ end
 function Cs.button:_update(dt)
 	Cs.button.super._update(self, dt)
 	local sprite = self._sprite
-	if sprite then
-		sprite:update(dt)
-	end
+	if sprite then updateSprite(sprite, dt) end
 end
 
 
@@ -4918,8 +5001,7 @@ function Cs.button:_draw()
 
 	local image, quad, iw, ih = nil, nil, 0, 0
 	if self._sprite then
-		image, quad = self._sprite:getCurrentImage()
-		iw, ih = image:getDimensions()
+		image, quad, iw, ih = getCurrentViewOfSprite(self._sprite)
 	end
 	LG.setFont(self:getFont())
 	themeRender(

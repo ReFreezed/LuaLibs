@@ -247,6 +247,7 @@
 local class      = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- In parent folder.
 local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- In same folder.
 local LG = love.graphics
+local LM = love.mouse
 
 local COLOR_TRANSPARENT = {0,0,0,0}
 local COLOR_WHITE = {255,255,255,255}
@@ -268,6 +269,7 @@ local Gui = class('Gui', {
 	_lockNavigation = false,
 	_mouseFocus = nil, _mouseFocusSet = nil,
 	_mouseIsGrabbed = false,
+	_mouseIsOverInput = false,
 	_mouseOffsetX = 0, _mouseOffsetY = 0, -- (Not used at the moment.)
 	_mouseX = nil, _mouseY = nil,
 	_navigationTarget = nil, _timeSinceNavigation = 0.0,
@@ -889,12 +891,12 @@ function setMouseFocus(gui, el, buttonN)
 		end
 		gui._mouseFocus = el
 		gui._mouseFocusSet[buttonN] = true
-		love.mouse.setGrabbed(true)
+		LM.setGrabbed(true)
 	else
 		gui._mouseFocus = nil
 		gui._mouseFocusSet = {}
 		gui._mouseOffsetX, gui._mouseOffsetY = 0, 0
-		love.mouse.setGrabbed(gui._mouseIsGrabbed)
+		LM.setGrabbed(gui._mouseIsGrabbed)
 	end
 end
 
@@ -1381,16 +1383,30 @@ function Gui:update(dt)
 		self:mousemoved(nil, nil)
 	end
 
+
+
 	-- Update mouse cursor
+
+	local mouseWasOverInput = self._mouseIsOverInput
+	self._mouseIsOverInput = false
+
 	local el = (self._mouseFocus or self._hoveredElement)
 	if (el and el:is(Cs.input) and el._active)
 		and (el:isKeyboardFocus() or not el._mouseFocus)
 		and (el:isHovered() or self._mouseFocusSet[1])
 	then
-		love.mouse.setCursor(love.mouse.getSystemCursor('ibeam'))
-	else
-		love.mouse.setCursor()
+		self._mouseIsOverInput = true
 	end
+
+	if self._mouseIsOverInput ~= mouseWasOverInput then
+		if self._mouseIsOverInput then
+			LM.setCursor(LM.getSystemCursor'ibeam')
+		else
+			LM.setCursor()
+		end
+	end
+
+
 
 	self._ignoreKeyboardInputThisFrame = false
 

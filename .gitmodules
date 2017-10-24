@@ -1,0 +1,3 @@
+[submodule "Gui"]
+	path = Gui
+	url = https://github.com/ReFreezed/GuiLove.git

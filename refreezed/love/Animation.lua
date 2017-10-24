@@ -1,8 +1,12 @@
 --[[============================================================
 --=
---=  Animation data class v1.0 (for the Sprite class)
+--=  Animation data class (for the Sprite class)
 --=  - Written by Marcus 'ReFreezed' Thunström
 --=  - MIT License (See the bottom of this file)
+--=
+--=  Changelog:
+--=  v1.0.1: Quad cache can now be garbage collected.
+--=  v1.0.0: First release.
 --=
 --==============================================================
 
@@ -20,7 +24,7 @@ local Animation = newClass('Animation', {
 
 	DEFAULT_FRAME_DURATION = 1/60,
 
-	--[[STATIC]] _quadCache = {},
+	--[[STATIC]] _quadCache = setmetatable({}, {__mode='v'}),
 
 	_imageFrameCount = 0,
 	_totalDuration = 0.0,
@@ -46,7 +50,7 @@ local Animation = newClass('Animation', {
 -- frames = { frame... }
 -- frame = { y(0), x(0), width(image.width), height(image.height), duration(DEFAULT_FRAME_DURATION) }
 -- frame = { type="image", quad=quad, duration=duration }
--- frame = { type="message", message=message, ... }
+-- frame = { type="message", message=message }
 function Animation:init(name, image, loop, frames)
 	if type(loop) ~= 'boolean' then
 		loop, frames = nil, loop

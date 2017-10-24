@@ -1,140 +1,239 @@
 --[[============================================================
 --=
---=  Class module v2.0
+--=  Class module v2.1
 --=  - Written by Marcus 'ReFreezed' Thunström
 --=  - MIT License (See the bottom of this file)
 --=
 --=  Changelog:
+--=  v2.1: Added several functions to the class module object.
 --=  v2.0: Renamed define/defineGet/defineSet to def/defget/defset.
 --=  v1.0: First release.
 --=
 --==============================================================
 
-	myClass = require("class")( className, baseTable ) -- create a new class
-	subClass = myClass:extend( className, baseTable ) -- create a subclass
+	class = require("class") -- Get the class module.
 
-	subClass.super -- access the parent class
+	myClass = class( className, baseTable ) -- Create a new class.
+	subClass = myClass:extend( className, baseTable ) -- Create a subclass.
 
-	instance = myClass(...) -- create a new instance (calls myClass.init)
-	result = instance:is( class ) -- check if the instance inherits a class
-	instance = instance:as( class ) -- get the instance if it inherits a class
+	subClass.super -- Access the parent class.
 
-	instance.class -- access the instance's class
+	instance = myClass(...) -- Create a new instance (which calls myClass:init() ).
+	result = instance:is( class ) -- Check if the instance inherits a class.
+	instance = instance:as( class ) -- Get the instance if it inherits a class.
 
-	-- Shorthands
-	myClass:def("myValue") -- automatically define simple getter and setter (getMyValue and setMyValue)
-	myClass:defget("myReadOnly") -- define simple getter (instance:getMyReadOnly returns instance.myReadOnly)
-	myClass:defset("myValue") -- define simple setter (instance:setMyValue updates instance.myValue)
+	instance.class -- Access the instance's class.
+
+	-- Shorthands.
+	myClass:def("myValue") -- Automatically define simple getter and setter (getMyValue() and setMyValue() ).
+	myClass:defget("myReadOnly") -- Define simple getter (instance:getMyReadOnly() returns instance.myReadOnly).
+	myClass:defset("myValue") -- Define simple setter (instance:setMyValue() updates instance.myValue).
 
 --============================================================]]
 
-local classes = setmetatable({}, {__mode='k'})
+
+
+local classes   = setmetatable({}, {__mode='k'})
 local instances = setmetatable({}, {__mode='k'})
 
+
+
+--==============================================================
+--==============================================================
 --==============================================================
 
-local extend, def, defget, defset, is, as, newClass
+local newClass
+local extend
+local def, defget, defset
+local is, as
 
--- class = newClass( name, class )
+
+
+-- class = newClass( name, classTable )
 local classMt = {
+
 	__call = function(C, ...)
+
 		local instance = {class=C}
-		instances[instance] = tostring(instance):match('0x(%w+)')
+		instances[instance] = tostring(instance):match'0x(%w+)'
+
 		setmetatable(instance, C)
+
 		instance:init(...)
+
 		return instance
 	end,
+
 	__tostring = function(C)
 		return ('class(%s)'):format(C.__name)
 	end,
+
 }
 function newClass(name, C)
-	if (type(name) ~= 'string') then
+	if type(name) ~= 'string' then
 		error('bad class name type (string expected, got '..type(name)..')', 2)
 	end
-	if (type(C) ~= 'table') then
+	if type(C) ~= 'table' then
 		error('bad base table type (table expected, got '..type(C)..')', 2)
 	end
-	assert(C)
-	classes[C] = tostring(C):match('0x(%w+)')
-	C.__index = C -- instances uses class as metatable
+
+	classes[C] = tostring(C):match'0x(%w+)'
+
+	-- Instances use their class as metatable.
+	C.__index = C
 	C.__name = name
+
 	return setmetatable(C, classMt)
 end
 
--- subClass = class:extend( name, subClass )
-function extend(C, name, subC)
-	if (type(name) ~= 'string') then
+
+
+-- subClass = class:extend( name, subClassTable )
+function extend(C, name, SubC)
+	if type(name) ~= 'string' then
 		error('bad class name type (string expected, got '..type(name)..')', 2)
 	end
-	if (type(subC) ~= 'table') then
-		error('bad base table type (table expected, got '..type(subC)..')', 2)
+	if type(SubC) ~= 'table' then
+		error('bad base table type (table expected, got '..type(SubC)..')', 2)
 	end
+
+	-- Subclasses do NOT use superclasses as metatables - we just copy everything over.
+	-- TODO: Confirm if this is actually faster than using a tree of metatables.
 	for k, v in pairs(C) do
-		if (subC[k] == nil) then
-			subC[k] = v -- subclasses do NOT use superclasses as metatables
+		if SubC[k] == nil then
+			SubC[k] = v
 		end
 	end
-	subC.super = C
-	return newClass(name, subC)
+
+	SubC.super = C
+
+	return newClass(name, SubC)
 end
 
--- class:def( propertyName [, getterMethod, setterMethod ] )
-function def(C, k, get, set)
-	defget(C, k, get)
-	defset(C, k, set)
+
+
+-- class:def( propertyName [, getterFunction, setterFunction ] )
+function def(C, k, getter, setter)
+	defget(C, k, getter)
+	defset(C, k, setter)
 end
--- class:defget( propertyName [, getterMethod ] )
-function defget(C, k, get)
-	C['get'..k:gsub('^_', ''):gsub('^.', string.upper)] = (get or function(self)
+
+-- class:defget( propertyName [, getterFunction ] )
+function defget(C, k, getter)
+
+	local suffix = k
+		:gsub('^_', '') -- Allow the property name to be either '_myProp' or 'myProp'.
+		:gsub('^.', string.upper)
+
+	C['get'..suffix] = (getter or function(self)
 		return self[k]
 	end)
+
 end
--- class:defset( propertyName [, setterMethod ] )
-function defset(C, k, set)
-	C['set'..k:gsub('^_', ''):gsub('^.', string.upper)] = (set or function(self, v)
+
+-- class:defset( propertyName [, setterFunction ] )
+function defset(C, k, setter)
+
+	local suffix = k
+		:gsub('^_', '') -- Allow the property name to be either '_myProp' or 'myProp'.
+		:gsub('^.', string.upper)
+
+	C['set'..suffix] = (setter or function(self, v)
 		self[k] = v
 	end)
+
 end
+
+
 
 -- result = instance:is( class )
 -- result = instance:is( classPath )
 -- result = class:is( class )
 -- result = class:is( classPath )
 function is(obj, C)
-	if (type(C) == 'string') then
+
+	if type(C) == 'string' then
 		C = require(C)
 	end
-	local currentClass = (classes[obj] and obj or obj.class)
+
+	if not classes[C] then
+		return false -- No object can "be" a non-class.
+	end
+
+	local currentClass = (classes[obj] and obj) or (instances[obj] and obj.class) or (nil)
+	if not currentClass then return false end
+
+	-- Look through the whole inheritance.
 	repeat
-		if (currentClass == C) then
-			return true
-		end
+		if currentClass == C then return true end
 		currentClass = currentClass.super
-	until (not currentClass)
+	until not currentClass
+
 	return false
 end
+
 -- instance = instance:as( class )
 -- instance = instance:as( classPath )
 function as(instance, C)
 	return (is(instance, C) and instance or nil)
 end
 
+
+
+--==============================================================
+--==============================================================
 --==============================================================
 
+
+
 local BaseClass = newClass('Class', {
-	__tostring = function(instance)
-		return ('%s(%s)'):format(instance.class.__name, instances[instance])
+
+	__tostring = function(self)
+		return ('%s(%s)'):format(self.class.__name, instances[self])
 	end,
+
 	extend = extend,
-	def = def, defget = defget, defset = defset,
-	is = is, as = as,
+
+	def = def,
+	defget = defget,
+	defset = defset,
+
+	is = is,
+	as = as,
+
 	init = function()end,
+
 })
 
-return function(...)
-	return BaseClass:extend(...)
-end
+
+
+--==============================================================
+
+
+
+local class = {
+
+	base = BaseClass,
+
+	def = def,
+	defget = defget,
+	defset = defset,
+
+	is = is,
+	as = as,
+
+}
+setmetatable(class, {
+
+	__call = function(t, ...)
+		return BaseClass:extend(...)
+	end,
+
+})
+
+return class
+
+
 
 --==============================================================
 --=

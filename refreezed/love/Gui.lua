@@ -12,9 +12,12 @@
 --=  - refreezed.love.Sprite
 --=
 --=  TODO:
+--=  - Remove Sprite class dependance.
+--=  - Enable automatic image switching in checkbox-like buttons.
 --=  - Make scrollbar handles draggable.
 --=  - Make pageup/pagedown/home/end work in scrollables.
 --=  - Percentage sizes for elements.
+--=  - Remove class module dependance?
 --=
 --==============================================================
 
@@ -200,11 +203,7 @@
 		- Event: draw
 
 		image
-		- getImageBackgroundColor, setImageBackgroundColor
-		- getImageColor, setImageColor
-		- getImageDimensions
-		- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
-		- setSprite
+		- Mixin: imageMixin
 
 		text
 
@@ -213,15 +212,11 @@
 		- Event: navigate
 
 			button
+			- Mixin: imageMixin
 			- getArrow
-			- getImageBackgroundColor, setImageBackgroundColor
-			- getImageColor, setImageColor
-			- getImageDimensions
-			- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
 			- getText2, getUnprocessedText2, setText2
 			- isToggled, setToggled
 			- press, isPressed
-			- setSprite
 			- Event: press
 			- Event: toggle
 
@@ -235,12 +230,24 @@
 
 
 
+	Mixins
+	----------------------------------------------------------------
+
+	imageMixin
+	- getImageBackgroundColor, setImageBackgroundColor
+	- getImageColor, setImageColor
+	- getImageDimensions
+	- getImageScale, getImageScaleX, getImageScaleY, setImageScale, setImageScaleX, setImageScaleY
+	- setSprite
+
+
+
 --============================================================]]
 
 
 
 -- Modules
-local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- In parent folder.
+local class      = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- In parent folder.
 local InputField = require((...):gsub('%.init$', ''):gsub('%.%w+$', '')..'.InputField') -- In same folder.
 local LG = love.graphics
 
@@ -249,7 +256,7 @@ local COLOR_WHITE = {255,255,255,255}
 local DEFAULT_FONT = LG.newFont(12)
 local tau = 2*math.pi
 
-local Gui = newClass('Gui', {
+local Gui = class('Gui', {
 
 	TOOLTIP_DELAY = 0.15,
 
@@ -282,7 +289,9 @@ local Gui = newClass('Gui', {
 })
 
 local defaultTheme -- Defined at the bottom of the file.
+
 local Cs = {} -- gui element Classes.
+local Ms = {} -- gui element Mixins.
 
 local validSoundKeys = {
 
@@ -303,6 +312,7 @@ local validSoundKeys = {
 --= Local functions ============================================
 --==============================================================
 
+local applyMixin
 local applyStyle
 local checkValidSoundKey
 local copyTable
@@ -337,6 +347,20 @@ local expandElement
 local updateFloatingElementPosition
 
 --==============================================================
+
+
+
+-- applyMixin( class, mixin )
+function applyMixin(C, mixin)
+	for fName, f in pairs(mixin) do
+
+		-- A mixin should only add new methods to classes, not override anything.
+		assert(C[fName] == nil)
+
+		C[fName] = f
+
+	end
+end
 
 
 
@@ -2055,12 +2079,121 @@ end
 
 
 --==============================================================
+--= Image Mixin ================================================
+--==============================================================
+
+
+
+Ms.imageMixin = {
+	--[[
+	_imageBackgroundColor = nil,
+	_imageColor = nil,
+	_imageScaleX = 1.0, _imageScaleY = 1.0,
+	_sprite = nil,
+	]]
+}
+
+
+
+-- getImageBackgroundColor, setImageBackgroundColor
+class.def(Ms.imageMixin, '_imageBackgroundColor')
+
+
+
+-- getImageColor, setImageColor
+class.def(Ms.imageMixin, '_imageColor')
+
+
+
+-- width, height = getImageDimensions( )
+function Ms.imageMixin:getImageDimensions()
+	local sprite = self._sprite
+	if not sprite then
+		return 0, 0
+	end
+	return sprite:getDimensions()
+end
+
+
+
+-- scaleX, scaleY = getImageScale( )
+function Ms.imageMixin:getImageScale()
+	return self._imageScaleX, self._imageScaleY
+end
+
+-- getImageScaleX
+class.defget(Ms.imageMixin, '_imageScaleX')
+
+-- getImageScaleY
+class.defget(Ms.imageMixin, '_imageScaleY')
+
+-- setImageScale( scaleX [, scaleY=scaleX ] )
+function Ms.imageMixin:setImageScale(sx, sy)
+	assertarg(1, sx, 'number')
+	assertarg(2, sy, 'number','nil')
+	sy = (sy or sx)
+	if (self._imageScaleX == sx and self._imageScaleY == sy) then
+		return
+	end
+	self._imageScaleX = sx
+	self._imageScaleY = sy
+	if self._sprite then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+end
+
+-- setImageScaleX( scaleX )
+function Ms.imageMixin:setImageScaleX(sx)
+	assertarg(1, sx, 'number')
+	if self._imageScaleX == sx then  return  end
+	self:setImageScale(sx, self._imageScaleY)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
+end
+
+-- setImageScaleY( scaleY )
+function Ms.imageMixin:setImageScaleY(sy)
+	assertarg(1, sy, 'number')
+	if self._imageScaleY == sy then  return  end
+	self:setImageScale(self._imageScaleY, sy)
+	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
+end
+
+
+
+-- setSprite( sprite )
+function Ms.imageMixin:setSprite(sprite)
+	assertarg(1, sprite, 'table','string','nil')
+
+	if type(sprite) == 'string' then
+		local spriteLoader = self._gui._spriteLoader
+		sprite = (spriteLoader and spriteLoader(sprite))
+	end
+
+	local oldIw, oldIh = 0, 0
+	if self._sprite then
+		oldIw, oldIh = self._sprite:getDimensions()
+	end
+	self._sprite = (sprite and sprite:clone())
+
+	local iw, ih = 0, 0
+	if self._sprite then
+		iw, ih = self._sprite:getDimensions()
+	end
+	if not (iw == oldIw and ih == oldIh) then
+		scheduleLayoutUpdateIfDisplayed(self)
+	end
+
+end
+
+
+
+--==============================================================
 --= Element ====================================================
 --==============================================================
 
 
 
-Cs.element = newClass('GuiElement', {
+Cs.element = class('GuiElement', {
 
 	--[[STATIC]] _events = {},
 
@@ -3315,7 +3448,7 @@ function Cs.container:_draw()
 		if innerW > insideW then
 			handleX = round(x - (childAreaW-handleLen) * self._scrollX/(innerW-insideW) )
 		end
-		themeRenderArea(self, 'scrollbar', 0, h-sbW, childAreaW, sbW, 'x', handleX-x, handleLen) -- asdf
+		themeRenderArea(self, 'scrollbar', 0, h-sbW, childAreaW, sbW, 'x', handleX-x, handleLen)
 	end
 	if maxH then
 		local insideH = (childAreaH-2*self._padding)
@@ -4520,12 +4653,14 @@ end
 
 Cs.image = Cs.leaf:extend('GuiImage', {
 
+	-- imageMixin
 	_imageBackgroundColor = nil,
 	_imageColor = nil,
 	_imageScaleX = 1.0, _imageScaleY = 1.0,
 	_sprite = nil,
 
 })
+applyMixin(Cs.image, Ms.imageMixin)
 registerEvents(Cs.image, {
 })
 
@@ -4578,98 +4713,6 @@ function Cs.image:_draw()
 	themeRender(self, 'image', image, quad, iw*sx, ih*sy, sx, sy, imageColor, imageBgColor)
 
 	trigger(self, 'afterdraw', x, y, w, h)
-
-end
-
-
-
--- getImageBackgroundColor, setImageBackgroundColor
-Cs.image:def'_imageBackgroundColor'
-
-
-
--- getImageColor, setImageColor
-Cs.image:def'_imageColor'
-
-
-
--- width, height = getImageDimensions( )
-function Cs.image:getImageDimensions()
-	local sprite = self._sprite
-	if not sprite then
-		return 0, 0
-	end
-	return sprite:getDimensions()
-end
-
-
-
--- scaleX, scaleY = getImageScale( )
-function Cs.image:getImageScale()
-	return self._imageScaleX, self._imageScaleY
-end
-
--- getImageScaleX
-Cs.image:defget'_imageScaleX'
-
--- getImageScaleY
-Cs.image:defget'_imageScaleY'
-
--- setImageScale( scaleX [, scaleY=scaleX ] )
-function Cs.image:setImageScale(sx, sy)
-	assertarg(1, sx, 'number')
-	assertarg(2, sy, 'number','nil')
-	sy = (sy or sx)
-	if (self._imageScaleX == sx and self._imageScaleY == sy) then
-		return
-	end
-	self._imageScaleX = sx
-	self._imageScaleY = sy
-	if self._sprite then
-		scheduleLayoutUpdateIfDisplayed(self)
-	end
-end
-
--- setImageScaleX( scaleX )
-function Cs.image:setImageScaleX(sx)
-	assertarg(1, sx, 'number')
-	if self._imageScaleX == sx then  return  end
-	self:setImageScale(sx, self._imageScaleY)
-	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
-end
-
--- setImageScaleY( scaleY )
-function Cs.image:setImageScaleY(sy)
-	assertarg(1, sy, 'number')
-	if self._imageScaleY == sy then  return  end
-	self:setImageScale(self._imageScaleY, sy)
-	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
-end
-
-
-
--- setSprite( sprite )
-function Cs.image:setSprite(sprite)
-	assertarg(1, sprite, 'table','string','nil')
-
-	if type(sprite) == 'string' then
-		local spriteLoader = self._gui._spriteLoader
-		sprite = (spriteLoader and spriteLoader(sprite))
-	end
-
-	local oldIw, oldIh = 0, 0
-	if self._sprite then
-		oldIw, oldIh = self._sprite:getDimensions()
-	end
-	self._sprite = (sprite and sprite:clone())
-
-	local iw, ih = 0, 0
-	if self._sprite then
-		iw, ih = self._sprite:getDimensions()
-	end
-	if not (iw == oldIw and ih == oldIh) then
-		scheduleLayoutUpdateIfDisplayed(self)
-	end
 
 end
 
@@ -4805,18 +4848,21 @@ Cs.button = Cs.widget:extend('GuiButton', {
 	_textWidth1 = 0, _textWidth2 = 0,
 	_unprocessedText2 = '',
 
+	-- imageMixin
+	_imageBackgroundColor = nil,
+	_imageColor = nil,
+	_imageScaleX = 1.0, _imageScaleY = 1.0,
+	_sprite = nil,
+
 	_arrow = nil,
 	_canToggle = false,
 	_close = false,
-	_imageBackgroundColor = nil,
-	_imageColor = nil,
 	_imagePadding = 0,
-	_imageScaleX = 1.0, _imageScaleY = 1.0,
-	_sprite = nil,
 	_text2 = '',
 	_toggled = false,
 
 })
+applyMixin(Cs.button, Ms.imageMixin)
 registerEvents(Cs.button, {
 	'press',
 	'toggle',
@@ -4887,72 +4933,8 @@ end
 
 
 
+-- getArrow
 Cs.button:defget'_arrow'
-
-
-
--- getImageBackgroundColor, setImageBackgroundColor
-Cs.button:def'_imageBackgroundColor'
-
-
-
--- getImageColor, setImageColor
-Cs.button:def'_imageColor'
-
-
-
--- width, height = getImageDimensions( )
-function Cs.button:getImageDimensions()
-	local sprite = self._sprite
-	if not sprite then
-		return 0, 0
-	end
-	return sprite:getDimensions()
-end
-
-
-
--- scaleX, scaleY = getImageScale( )
-function Cs.button:getImageScale()
-	return self._imageScaleX, self._imageScaleY
-end
-
--- getImageScaleX
-Cs.button:defget'_imageScaleX'
-
--- getImageScaleY
-Cs.button:defget'_imageScaleY'
-
--- setImageScale( scaleX [, scaleY=scaleX ] )
-function Cs.button:setImageScale(sx, sy)
-	assertarg(1, sx, 'number')
-	assertarg(2, sy, 'number','nil')
-	sy = (sy or sx)
-	if (self._imageScaleX == sx and self._imageScaleY == sy) then
-		return
-	end
-	self._imageScaleX = sx
-	self._imageScaleY = sy
-	if self._sprite then
-		scheduleLayoutUpdateIfDisplayed(self)
-	end
-end
-
--- setImageScaleX( scaleX )
-function Cs.button:setImageScaleX(sx)
-	assertarg(1, sx, 'number')
-	if self._imageScaleX == sx then  return  end
-	self:setImageScale(sx, self._imageScaleY)
-	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
-end
-
--- setImageScaleY( scaleY )
-function Cs.button:setImageScaleY(sy)
-	assertarg(1, sy, 'number')
-	if self._imageScaleY == sy then  return  end
-	self:setImageScale(self._imageScaleY, sy)
-	if self._sprite then  scheduleLayoutUpdateIfDisplayed(self)  end
-end
 
 
 
@@ -4960,7 +4942,7 @@ end
 Cs.button:defget'_text2'
 
 -- getUnprocessedText2
-Cs.leaf:defget'_unprocessedText2'
+Cs.button:defget'_unprocessedText2'
 
 -- OVERRIDE  setText( text )
 function Cs.button:setText(text)
@@ -5108,33 +5090,6 @@ end
 function Cs.button:reprocessTexts()
 	Cs.button.super.reprocessTexts(self)
 	self:setText2(self._unprocessedText2)
-end
-
-
-
--- setSprite( sprite )
-function Cs.button:setSprite(sprite)
-	assertarg(1, sprite, 'table','string','nil')
-
-	if type(sprite) == 'string' then
-		local spriteLoader = self._gui._spriteLoader
-		sprite = (spriteLoader and spriteLoader(sprite))
-	end
-
-	local oldIw, oldIh = 0, 0
-	if self._sprite then
-		oldIw, oldIh = self._sprite:getDimensions()
-	end
-	self._sprite = (sprite and sprite:clone())
-
-	local iw, ih = 0, 0
-	if self._sprite then
-		iw, ih = self._sprite:getDimensions()
-	end
-	if not (iw == oldIw and ih == oldIh) then
-		scheduleLayoutUpdateIfDisplayed(self)
-	end
-
 end
 
 
@@ -5796,7 +5751,7 @@ defaultTheme = {
 		['scrollbar'] = function(el, w, h, dir, pos, len)
 
 			LG.setColor(255, 255, 255, 70)
-			if dir == 'x' then -- asdf
+			if dir == 'x' then
 				Gui.draw9PartScaled(pos+1, 1, len-2, h-2, BUTTON_BG, unpack(BUTTON_BG_QUADS))
 			else--if dir == 'y' then
 				Gui.draw9PartScaled(1, pos+1, w-2, len-2, BUTTON_BG, unpack(BUTTON_BG_QUADS))

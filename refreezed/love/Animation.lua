@@ -5,11 +5,13 @@
 --=  - MIT License (See the bottom of this file)
 --=
 --=  Changelog:
---=  v1.0.1: Quad cache can now be garbage collected.
---=  v1.0.0: First release.
+--=    1.1.0 2017-11-01: Added get*Time().
+--=    1.0.1 2017-??-??: Quad cache can now be garbage collected.
+--=    1.0.0 2017-??-??: First release.
 --=
 --==============================================================
 
+	getFrameStartingTime, getMessageTime
 	getImageFrame, getImageFrameAt, getImageFrameAfterMessage, getImageFrameCount
 	getTotalDuration
 
@@ -17,10 +19,11 @@
 
 
 
--- Modules.
-local newClass = require((...):gsub('%.init$', ''):gsub('%.%w+%.%w+$', '')..'.class') -- (In parent folder.)
+local moduleFolder = ('.'..(...)) :gsub('%.%w+$', '')
+local parentFolder = moduleFolder :gsub('%.%w+$', '')
+local class = require((parentFolder..'.class'):sub(2))
 
-local Animation = newClass('Animation', {
+local Animation = class('Animation', {
 
 	DEFAULT_FRAME_DURATION = 1/60,
 
@@ -102,6 +105,38 @@ end
 --==============================================================
 --==============================================================
 --==============================================================
+
+
+
+-- time = getFrameStartingTime( frameIndex )
+function Animation:getFrameStartingTime(targetFrameI)
+	local time = 0
+	for frameI, frameData in ipairs(self) do
+
+		if frameI == targetFrameI then return time end
+
+		if frameData.type == 'image' then
+			time = time+frameData.duration
+		end
+
+	end
+	return nil -- The target frame index is out of bounds.
+end
+
+-- time = getMessageTime( message )
+function Animation:getMessageTime(message)
+	local time = 0
+	for frameI, frameData in ipairs(self) do
+
+		if frameData.message == message then return time end
+
+		if frameData.type == 'image' then
+			time = time+frameData.duration
+		end
+
+	end
+	return nil -- The message doesn't exist.
+end
 
 
 

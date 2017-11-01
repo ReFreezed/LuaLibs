@@ -1,6 +1,6 @@
 --[[============================================================
 --=
---=  Sprite class v1.0
+--=  Sprite class
 --=  - Written by Marcus 'ReFreezed' Thunström
 --=  - MIT License (See the bottom of this file)
 --=
@@ -8,6 +8,10 @@
 --=  - LÖVE 0.10.2 (May work with earlier versions.)
 --=  - refreezed.class
 --=  - refreezed.love.Animation
+--=
+--=  Changelog:
+--=    1.1.0 2017-11-01: Added getCurrentTime() and related methods.
+--=    1.0.0 2017-??-??: First release.
 --=
 --==============================================================
 
@@ -22,6 +26,7 @@
 	getColor, setColor, setRed, setGreen, setBlue, setAlpha, isColorActive, setColorActive
 	getCurrentFrame, setCurrentFrame, getCurrentFrameTime, setCurrentFrameTime
 	getCurrentImage
+	getCurrentTime, getRemainingTime, getProgress
 	getDimensions, getWidth, getHeight, getScaledDimensions, getScaledWidth, getScaledHeight
 	getImageFrameCount, setImageFrame, setRandomImageFrame
 	getLeft, getTop
@@ -45,11 +50,11 @@
 
 
 
-local newClass = require(
-	(...) :gsub('%.init$', '') :gsub('%.%w+%.%w+$', '') .. '.class' -- In parent folder.
-)
+local moduleFolder = ('.'..(...)) :gsub('%.%w+$', '')
+local parentFolder = moduleFolder :gsub('%.%w+$', '')
+local class = require((parentFolder..'.class'):sub(2))
 
-local Sprite = newClass('Sprite', {
+local Sprite = class('Sprite', {
 
 	FRAME_MAX_LOOPS = 1000,
 
@@ -587,6 +592,25 @@ function Sprite:getCurrentImage()
 	if not anim then  return nil  end
 	local frameData = anim[self._currentFrame]
 	return anim.image, frameData.quad
+end
+
+
+
+-- time = getCurrentTime( )
+function Sprite:getCurrentTime()
+	local anim = self._animation
+	return (anim and anim:getFrameStartingTime(self._currentFrame)+self._currentFrameTime or 0)
+end
+
+-- time = getRemainingTime( )
+function Sprite:getRemainingTime()
+	return self:getTotalDuration()-self:getCurrentTime()
+end
+
+-- progress = getProgress( )
+function Sprite:getProgress()
+	local duration = self:getTotalDuration()
+	return (duration > 0 and self:getCurrentTime()/duration or 1)
 end
 
 
